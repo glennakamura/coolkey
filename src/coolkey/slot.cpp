@@ -2192,6 +2192,10 @@ Slot::readCACCertificateFirst(CKYBuffer *cert, CKYSize *nextSize,
 	if (throwException && (status != CKYSUCCESS)) {
 	    handleConnectionError();
 	}
+        
+        if(CKYBuffer_Size(cert) == 0) {
+            handleConnectionError();
+        }
 	return status;
     }
 
