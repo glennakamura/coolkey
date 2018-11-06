@@ -32,7 +32,8 @@
 
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
 
-
+#define MAX_NUM_KEYS  32
+#define MAX_NUM_CERTS 32
 
 #ifdef DEBUG
 #define PRINTF(args) printf args
@@ -3458,7 +3459,7 @@ Slot::loadObjects()
         } else if( type == 'c' ) {
             // cert attribute object. find the DER encoding
             unsigned short certnum = getObjectIndex(iter->obj.objectID);
-            if( certnum > 9 ) {
+            if( certnum > MAX_NUM_CERTS ) {
                 //invalid object id
                 throw PKCS11Exception(CKR_DEVICE_ERROR,
                     "Invalid object id %08x",iter->obj.objectID);
@@ -4154,7 +4155,7 @@ Slot::objectToKeyNum(const PKCS11Object *key)
         throw PKCS11Exception(CKR_KEY_HANDLE_INVALID);
     }
     unsigned short keyNum = getObjectIndex(id);
-    if( keyNum > 9 ) {
+    if( keyNum > MAX_NUM_KEYS ) {
         throw PKCS11Exception(CKR_KEY_HANDLE_INVALID);
     }
     return keyNum & 0xFF;
@@ -4911,7 +4912,6 @@ Slot::generateRandom(SessionHandleSuffix suffix, const CK_BYTE_PTR pData,
     }
 }
 
-#define MAX_NUM_KEYS 8
 unsigned int
 Slot::getRSAKeySize(PKCS11Object *key)
 {

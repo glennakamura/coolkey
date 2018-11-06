@@ -512,7 +512,17 @@ class Slot {
         return (char) (objectID >> 24) & 0xff;
     }
     unsigned short getObjectIndex(unsigned long objectID) const {
-        return (char )((objectID >> 16) & 0xff) - '0';
+       char char_index = (char) ((objectID >> 16) & 0xff);
+       if (char_index >= '0' && char_index <= '9') {
+           return char_index - '0';
+       }
+       if (char_index >= 'A' && char_index <= 'Z') {
+           return char_index - 'A' + 10;
+       }
+       if (char_index >= 'a' && char_index <= 'z') {
+           return char_index - 'a' + 26 + 10;
+       }
+       return 0x0100 + char_index;
     }
 
     // actually get the size of a key in bits from the card
