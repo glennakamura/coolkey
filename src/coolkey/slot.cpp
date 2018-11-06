@@ -1875,6 +1875,8 @@ SlotList::waitForSlotEvent(CK_FLAGS flag, CK_SLOT_ID_PTR slotp, CK_VOID_PTR res)
 	if (status != CKYSUCCESS) {
 	    if ((CKYCardContext_GetLastError(context) ==
 						 SCARD_E_READER_UNAVAILABLE) ||
+	       (CKYCardContext_GetLastError(context) ==
+						 SCARD_E_UNKNOWN_READER) ||
 	       (CKYCardContext_GetLastError(context) == SCARD_E_TIMEOUT)) {
 		OSSleep(timeout*PKCS11_CARD_ERROR_LATENCY);
 	    }
