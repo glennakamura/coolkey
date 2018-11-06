@@ -762,13 +762,7 @@ Slot::connectToToken()
 				CKYCardConnection_GetLastError(conn));
 		    disconnect();
 	    }
-	    /* CARD is a PIV card */
-	    state |= PIV_CARD | APPLET_SELECTABLE | APPLET_PERSONALIZED;
-	    isVersion1Key = 0;
-	    needLogin = 1;
-            mCoolkey = 0;
-	    mOldCAC = 0;
-	    mCACLocalLogin = getPIVLoginType();
+	    /* CARD is unknown */
 	    return;
 	}
 	state |= CAC_CARD | APPLET_SELECTABLE | APPLET_PERSONALIZED;
