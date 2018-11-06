@@ -1361,6 +1361,9 @@ P15Applet_SignDecrypt(CKYCardConnection *conn, CKYByte key,
 	appendLength = length;
     } else {
 	ret = CKYBuffer_Reserve(&tmp, length);
+	if (ret != CKYSUCCESS) {
+	    goto done;
+	}
     }
     CKYBuffer_AppendBuffer(&tmp, data, offset, appendLength);
     pso.chain = 0;

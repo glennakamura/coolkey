@@ -736,7 +736,7 @@ CKYAPDU_SetShortReceiveLen(CKYAPDU *apdu, unsigned short recvlen)
     CKYStatus ret;
 
     if (recvlen <= CKYAPDU_MAX_DATA_LEN) {
-	return APDU_SetReceiveLen(apdu, (CKYByte)(recvlen & 0xff));
+	return CKYAPDU_SetReceiveLen(apdu, (CKYByte)(recvlen & 0xff));
     }
     ret = CKYBuffer_Resize(&apdu->apduBuf, CKYAPDU_HEADER_LEN+2);
     if (ret != CKYSUCCESS) {

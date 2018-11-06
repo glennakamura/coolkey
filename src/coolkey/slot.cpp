@@ -3714,7 +3714,6 @@ void
 Slot::attemptP15Login(CK_USER_TYPE user)
 {
     PinCache *pinCachePtr  = userPinCache(user);
-    const CKYBuffer *path;
 
     if (user == CKU_USER) {
 	loggedIn = false;
@@ -3729,7 +3728,6 @@ Slot::attemptP15Login(CK_USER_TYPE user)
 			"No PKCS #15 auth object for user %d\n", user);
     }
 
-    path = auth[user]->getObjectPath().getPath();
     status = selectPath(auth[user]->getObjectPath().getPath(), &result);
     if( status == CKYSCARDERR )  {
 	handleConnectionError();

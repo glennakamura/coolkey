@@ -1558,7 +1558,7 @@ unsigned long GetBits(const CKYByte *entry, CKYSize entrySize,
    /* turn the flags into an int */
    for (i=0; i < entrySize; i++) {
 	CKYByte c = rev[entry[i]];
-	bits  = bits | (c << i*8);
+	bits  = bits | (((unsigned long)c) << (i*8));
    }
    return bits | bitFlag;
 }
@@ -1585,8 +1585,8 @@ CKYStatus PK15ObjectPath::setObjectPath(const CKYByte *current, CKYSize size)
     if (entry == NULL) { return CKYINVALIDDATA; }
     tagSize = entry - current;
     current += entrySize + tagSize;
+    if (size < (entrySize + tagSize)) { return CKYINVALIDDATA; }
     size -= (entrySize +tagSize);
-    if (size < 0) { return CKYINVALIDDATA; }
     status = CKYBuffer_Replace(&path, 0, entry, entrySize);
     if (status != CKYSUCCESS) {
 	return status;
@@ -1598,8 +1598,8 @@ CKYStatus PK15ObjectPath::setObjectPath(const CKYByte *current, CKYSize size)
 	if (entry == NULL) { return CKYINVALIDDATA; }
 	tagSize = entry - current;
 	current += entrySize + tagSize;
+	if (size < (entrySize + tagSize)) { return CKYINVALIDDATA; }
 	size -= (entrySize +tagSize);
-	if (size < 0) { return CKYINVALIDDATA; }
 	if (entrySize > 5) { return CKYINVALIDDATA; }
 	for (index = 0, i=0; i < entrySize; i++) {
 	    index = (index << 8) + (unsigned int) entry[i];
@@ -1612,8 +1612,8 @@ CKYStatus PK15ObjectPath::setObjectPath(const CKYByte *current, CKYSize size)
 	if (entry == NULL) { return CKYINVALIDDATA; }
 	tagSize = entry - current;
 	current += entrySize + tagSize;
+	if (size < (entrySize + tagSize)) { return CKYINVALIDDATA; }
 	size -= (entrySize +tagSize);
-	if (size < 0) { return CKYINVALIDDATA; }
 	if (entrySize > 5) { return CKYINVALIDDATA; }
 	for (length = 0, i=0; i < entrySize; i++) {
 	    length = (length << 8) + (unsigned int) entry[i];
@@ -1741,8 +1741,8 @@ set_key_type:
     /* point current to the next section (cass attributes)  */
     tagSize = commonAttributes - current;
     current += commonSize + tagSize;
+    if (currentSize < (commonSize + tagSize)) { return CKYINVALIDDATA; }
     currentSize -= (commonSize +tagSize);
-    if (currentSize < 0) { return CKYINVALIDDATA; }
 
     /* get the CKA_LABEL */
     if (commonAttributes[0] != ASN1_UTF8_STRING) { return CKYINVALIDDATA; }
@@ -1835,8 +1835,8 @@ PK15Object::completeCertObject(const CKYByte *current, CKYSize currentSize)
     /* point current to the next section (type attributes)  */
     tagSize = commonCertAttributes - current;
     current += commonSize + tagSize;
+    if (currentSize < (commonSize + tagSize)) { return CKYINVALIDDATA; }
     currentSize -= (commonSize +tagSize);
-    if (currentSize < 0) { return CKYINVALIDDATA; }
 
     /* get the id */
     if (commonCertAttributes[0] != ASN1_OCTET_STRING) { return CKYINVALIDDATA; }
@@ -1907,8 +1907,8 @@ PK15Object::completeAuthObject(const CKYByte *current, CKYSize currentSize)
 	if (commonAuthAttributes == NULL) { return CKYINVALIDDATA; }
 	tagSize = commonAuthAttributes - current;
 	current += commonSize + tagSize;
+	if (currentSize < (commonSize + tagSize)) { return CKYINVALIDDATA; }
 	currentSize -= (commonSize + tagSize);
-	if (currentSize < 0) { return CKYINVALIDDATA; }
 	if (commonAuthAttributes[0] != ASN1_OCTET_STRING) {
 	    return CKYINVALIDDATA;
 	}
@@ -1930,8 +1930,8 @@ PK15Object::completeAuthObject(const CKYByte *current, CKYSize currentSize)
     if (commonAuthAttributes == NULL) { return CKYINVALIDDATA; }
     tagSize = commonAuthAttributes - current;
     current += commonSize + tagSize;
-    currentSize -= (commonSize +tagSize);
-    if (currentSize < 0) { return CKYINVALIDDATA; }
+    if (currentSize < (commonSize + tagSize)) { return CKYINVALIDDATA; }
+    currentSize -= (commonSize + tagSize);
     /*
      * parse the Pin Auth Attributes 
      *     pinFlags  BIT_STRING
@@ -2093,8 +2093,8 @@ PK15Object::completeKeyObject(const CKYByte *current, CKYSize currentSize)
     /* point current to the next section (sublcass attributes)  */
     tagSize = commonKeyAttributes - current;
     current += commonSize + tagSize;
-    currentSize -= (commonSize +tagSize);
-    if (currentSize < 0) { return CKYINVALIDDATA; }
+    if (currentSize < (commonSize + tagSize)) { return CKYINVALIDDATA; }
+    currentSize -= (commonSize + tagSize);
 
     /* get the id */
     if (commonKeyAttributes[0] != ASN1_OCTET_STRING) { return CKYINVALIDDATA; }
@@ -2263,8 +2263,8 @@ CKYStatus PK15Object::completePrivKeyObject(const CKYByte *current,
 	/* point current to the next section (type attributes)  */
 	tagSize = commonPrivKeyAttributes - current;
 	current += commonSize + tagSize;
+	if (currentSize < (commonSize + tagSize)) { return CKYINVALIDDATA; }
 	currentSize -= (commonSize +tagSize);
-	if (currentSize < 0) { return CKYINVALIDDATA; }
 
  	/* subjectName */
 	if (commonPrivKeyAttributes[0] == ASN1_SEQUENCE) {
@@ -2385,8 +2385,8 @@ PK15Object::completePubKeyObject(const CKYByte *current, CKYSize currentSize)
 	/* point current to the next section (type attributes)  */
 	tagSize = commonPubKeyAttributes - current;
 	current += commonSize + tagSize;
-	currentSize -= (commonSize +tagSize);
-	if (currentSize < 0) { return CKYINVALIDDATA; }
+	if (currentSize < (commonSize + tagSize)) { return CKYINVALIDDATA; }
+	currentSize -= (commonSize + tagSize);
 
  	/* subjectName */
 	if (commonPubKeyAttributes[0] == ASN1_SEQUENCE) {
@@ -2535,8 +2535,8 @@ PK15Object::completeRawPublicKey(const CKYByte *current, CKYSize size)
     if (entry == NULL) { return CKYINVALIDDATA; }
     tagSize = entry - current;
     current += entrySize + tagSize;
+    if (size < (entrySize + tagSize)) { return CKYINVALIDDATA; }
     size -= (entrySize +tagSize);
-    if (size < 0) { return CKYINVALIDDATA; }
     if ((entry[0] == 0) && (entrySize > 1)) {
 	entry++; entrySize--;
     }
@@ -2548,8 +2548,8 @@ PK15Object::completeRawPublicKey(const CKYByte *current, CKYSize size)
     if (entry == NULL) { return CKYINVALIDDATA; }
     tagSize = entry - current;
     current += entrySize + tagSize;
-    size -= (entrySize +tagSize);
-    if (size < 0) { return CKYINVALIDDATA; }
+    if (size < (entrySize + tagSize)) { return CKYINVALIDDATA; }
+    size -= (entrySize + tagSize);
     if ((entry[0] == 0) && (entrySize > 1)) {
 	entry++; entrySize--;
     }
@@ -2682,11 +2682,11 @@ DEREncodedTokenInfo::DEREncodedTokenInfo(CKYBuffer *derTokenInfo)
     if (entry == NULL) return;
     tagSize = entry - current;
     current += tagSize + entrySize;
+    if (size < tagSize + entrySize) return;
     size -= tagSize + entrySize;
     if (entrySize < 1) {
 	version = *entry;
     }
-    if (size < 0) return;
 
     /* get the serial number */
     if (current[0] != ASN1_OCTET_STRING) { return ; }
@@ -2729,6 +2729,8 @@ DEREncodedTokenInfo::DEREncodedTokenInfo(CKYBuffer *derTokenInfo)
     }
 
     /* parsing flags */
+#ifdef notdef
+    /* we arn't using this right now, keep it for future reference */
     if (current[0] == ASN1_BIT_STRING) {
     /* recordinfo parsing would go here */
 	unsigned long bits;
@@ -2739,6 +2741,7 @@ DEREncodedTokenInfo::DEREncodedTokenInfo(CKYBuffer *derTokenInfo)
 	size -= tagSize + entrySize;
 	bits = GetBits(entry, entrySize,8,2);
     }
+#endif
     return;
 }
 
