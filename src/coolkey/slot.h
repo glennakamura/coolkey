@@ -211,24 +211,27 @@ class CryptOpState {
     State state;
     CKYByte keyNum;
     CKYBuffer result;
+    PKCS11Object::KeyType keyType;
 
-    CryptOpState() : state(NOT_INITIALIZED), keyNum(0) 
+    CryptOpState() : state(NOT_INITIALIZED), keyNum(0), keyType(PKCS11Object::unknown)
 				{ CKYBuffer_InitEmpty(&result); }
     CryptOpState(const CryptOpState &cpy) : 
-				state(cpy.state), keyNum(cpy.keyNum) { 
+				state(cpy.state), keyNum(cpy.keyNum), keyType(cpy.keyType) { 
 	CKYBuffer_InitFromCopy(&result, &cpy.result);
     }
     CryptOpState &operator=(const CryptOpState &cpy) {
 	state = cpy.state,
 	keyNum = cpy.keyNum;
+        keyType = cpy.keyType;
 	CKYBuffer_Replace(&result, 0, CKYBuffer_Data(&cpy.result),
 				CKYBuffer_Size(&cpy.result));
 	return *this;
     }
     ~CryptOpState() { CKYBuffer_FreeData(&result); }
-    void initialize(CKYByte keyNum) {
+    void initialize(CKYByte keyNum, PKCS11Object::KeyType theKeyType) {
         state = IN_PROCESS;
         this->keyNum = keyNum;
+        this->keyType = theKeyType;
         CKYBuffer_Resize(&result, 0);
     }
 };
@@ -258,6 +261,7 @@ class Session {
 
     CryptOpState signatureState;
     CryptOpState decryptionState;
+    CryptOpState keyAgreementState;
 };
 
 typedef list<Session> SessionList;
@@ -267,12 +271,11 @@ typedef SessionList::const_iterator SessionConstIter;
 class CryptParams {
   private:
     unsigned int keySize; // in bits
-  protected:
-    unsigned int getKeySize() const { return keySize; }
   public:
     // set the actual key size obtained from the card
     void setKeySize(unsigned int newKeySize) { keySize = newKeySize; }
-    enum { DEFAULT_KEY_SIZE = 1024 };
+    unsigned int getKeySize() const { return keySize; }
+    enum { DEFAULT_KEY_SIZE = 1024, ECC_DEFAULT_KEY_SIZE=256 };
 
 
     CryptParams(unsigned int keySize_) : keySize(keySize_) { }
@@ -304,11 +307,14 @@ class Slot {
         ATR_MATCH = 0x04,
         APPLET_SELECTABLE = 0x08,
         APPLET_PERSONALIZED = 0x10,
-        CAC_CARD = 0x20
+        CAC_CARD = 0x20,
+        PIV_CARD = 0x40
     };
     enum {
 	NONCE_SIZE = 8
     };
+
+    static const SlotState GOV_CARD = (SlotState)(CAC_CARD|PIV_CARD);
 
   private:
     Log *log;
@@ -339,7 +345,10 @@ class Slot {
     bool fullTokenName;
     bool mCoolkey;
     bool mOldCAC;
-
+    bool mCACLocalLogin;
+    int pivContainer;
+    int pivKey;
+    bool mECC;
     //enum { RW_SESSION_HANDLE = 1, RO_SESSION_HANDLE = 2 };
 
 #ifdef USE_SHMEM
@@ -386,6 +395,7 @@ class Slot {
     const CKYBuffer *getATR();
     bool isLoggedIn();
     bool needLoggedIn();
+    bool getPIVLoginType();
     void testNonce();
 
     void addKeyObject(list<PKCS11Object>& objectList,
@@ -395,6 +405,7 @@ class Slot {
 	const CKYBuffer *derCert, CK_OBJECT_HANDLE handle);
     void addObject(list<PKCS11Object>& objectList,
         const ListObjectInfo& info, CK_OBJECT_HANDLE handle);
+    PKCS11Object *createSecretKeyObject(CK_OBJECT_HANDLE handle, CKYBuffer *secretKeyBuffer,CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulAttributeCount);
 
     void ensureValidSession(SessionHandleSuffix suffix);
 
@@ -408,7 +419,7 @@ class Slot {
     CKYStatus readCACCertificateAppend(CKYBuffer *cert, CKYSize nextSize);
 
     void selectApplet();
-    void selectCACApplet(CKYByte instance);
+    void selectCACApplet(CKYByte instance,bool do_disconnect);
     void unloadObjects();
     void loadCACObjects();
     void loadCACCert(CKYByte instance);
@@ -432,12 +443,23 @@ class Slot {
         CK_ULONG ulInputLen, CK_BYTE_PTR pOutput,
         CK_ULONG_PTR pulOutputLen, CryptParams& params);
 
-    void performRSAOp(CKYBuffer *out, const CKYBuffer *input, CKYByte keyNum, 
-							     CKYByte direction);
+    void performRSAOp(CKYBuffer *out, const CKYBuffer *input, unsigned int keySize,
+						CKYByte keyNum, CKYByte direction);
+
+    void signECC(SessionHandleSuffix suffix, CK_BYTE_PTR pInput,
+        CK_ULONG ulInputLen, CK_BYTE_PTR pOutput,
+        CK_ULONG_PTR pulOutputLen, CryptParams& params);
+
+    void performECCSignature(CKYBuffer *out, const CKYBuffer *input, 
+					unsigned int keySize, CKYByte keyNum);
+    void performECCKeyAgreement(CK_MECHANISM_TYPE deriveMech, 
+        CKYBuffer *publicDataBuffer, 
+        CKYBuffer *secretKeyBuffer, CKYByte keyNum, unsigned int keySize);
 
     void processComputeCrypt(CKYBuffer *result, const CKYAPDU *apdu);
 
     CKYByte objectHandleToKeyNum(CK_OBJECT_HANDLE hKey);
+    unsigned int calcECCKeySize(CKYByte keyNum);
     Slot(const Slot &cpy)
 #ifdef USE_SHMEM
 	: shmem(readerName)
@@ -469,7 +491,10 @@ class Slot {
     }
 
     // actually get the size of a key in bits from the card
-    unsigned int getKeySize(CKYByte keyNum);
+    unsigned int getRSAKeySize(CKYByte keyNum);
+    unsigned int getECCKeySize(CKYByte keyNum);
+
+    PKCS11Object::KeyType  getKeyTypeFromHandle(CK_OBJECT_HANDLE hKey);
 
     SessionHandleSuffix openSession(Session::Type type);
     void closeSession(SessionHandleSuffix handleSuffix);
@@ -511,6 +536,16 @@ class Slot {
 	CK_ULONG len);
     void generateRandom(SessionHandleSuffix suffix, CK_BYTE_PTR data,
 	CK_ULONG len);
+
+    void derive(SessionHandleSuffix suffix, CK_MECHANISM_PTR pMechanism,
+        CK_OBJECT_HANDLE hKey, CK_ATTRIBUTE_PTR pTemplate, 
+        CK_ULONG ulAttributeCount, CK_OBJECT_HANDLE_PTR phKey);
+
+    void deriveECC(SessionHandleSuffix suffix, CK_MECHANISM_PTR pMechanism,
+       CK_OBJECT_HANDLE hBaseKey, CK_ATTRIBUTE_PTR pTemplate, 
+       CK_ULONG ulAttributeCount, CK_OBJECT_HANDLE_PTR phKey, CryptParams& params);
+
+    bool getIsECC() { return mECC; }
 };
 
 class SlotList {
@@ -603,6 +638,10 @@ class SlotList {
 
     void seedRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData,
         CK_ULONG ulDataLen);
+
+    void derive(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism,
+        CK_OBJECT_HANDLE hKey, CK_ATTRIBUTE_PTR pTemplate, 
+        CK_ULONG ulAttributeCount, CK_OBJECT_HANDLE_PTR phKey);
 
 
 };

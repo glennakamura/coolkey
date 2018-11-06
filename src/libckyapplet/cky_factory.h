@@ -25,10 +25,11 @@
 /*
  * Various Class bytes 
  */
-#define CKY_CLASS_ISO7816 0x00
+#define CKY_CLASS_ISO7816	  0x00
+#define CKY_CLASS_ISO7816_CHAIN   0x10
 #define CKY_CLASS_GLOBAL_PLATFORM 0x80
-#define CKY_CLASS_SECURE 0x84
-#define CKY_CLASS_COOLKEY 0xb0
+#define CKY_CLASS_SECURE 	  0x84
+#define CKY_CLASS_COOLKEY	  0xb0
 
 /*
  * Applet Instruction Bytes
@@ -66,6 +67,8 @@
 /* nonce validated  & Secure Channel */
 #define CKY_INS_IMPORT_KEY	0x32
 #define CKY_INS_COMPUTE_CRYPT	0x36
+#define CKY_INS_COMPUTE_ECC_SIGNATURE 0x37
+#define CKY_INS_COMPUTE_ECC_KEY_AGREEMENT 0x38
 #define CKY_INS_CREATE_PIN	0x40
 #define CKY_INS_CHANGE_PIN	0x44
 #define CKY_INS_CREATE_OBJ	0x5A
@@ -91,6 +94,12 @@
 #define CAC_SIZE_GET_PROPERTIES	48
 #define CAC_P1_STEP		0x80
 #define CAC_P1_FINAL		0x00
+#define CAC_LOGIN_GLOBAL	0x00
+
+/* PIV */
+#define PIV_LOGIN_LOCAL		0x80
+#define PIV_LOGIN_GLOBAL	CAC_LOGIN_GLOBAL
+#define PIV_INS_GEN_AUTHENTICATE 0x87
 
 /*
  * Fixed return sized from various commands
@@ -123,6 +132,7 @@
 #define CKY_DES_ECB_NOPAD	0x21
 
 /* operations (Cipher Direction) */
+#define CKY_DIR_NONE            0x00
 #define CKY_DIR_SIGN		0x01
 #define CKY_DIR_VERIFY		0x02
 #define CKY_DIR_ENCRYPT		0x03
@@ -187,6 +197,12 @@ CKYStatus CKYAPDUFactory_ComputeCryptFinal(CKYAPDU *apdu, CKYByte keyNumber,
 CKYStatus CKYAPDUFactory_ComputeCryptOneStep(CKYAPDU *apdu, CKYByte keyNumber, 
 			    CKYByte mode, CKYByte direction, CKYByte location,
 			    const CKYBuffer *data, const CKYBuffer *sig);
+CKYStatus CKYAPDUFactory_ComputeECCSignatureOneStep(CKYAPDU *apdu, CKYByte keyNumber,
+                             CKYByte location,
+                            const CKYBuffer *data, const CKYBuffer *sig);
+CKYStatus CKYAPDUFactory_ComputeECCKeyAgreementOneStep(CKYAPDU *apdu, CKYByte keyNumber,
+                             CKYByte location,
+                            const CKYBuffer *publicData, const CKYBuffer *secretKey);
 CKYStatus CKYAPDUFactory_CreatePIN(CKYAPDU *apdu, CKYByte pinNumber, 
 				CKYByte maxAttempts, const char *pinValue);
 CKYStatus CKYAPDUFactory_VerifyPIN(CKYAPDU *apdu, CKYByte pinNumber, 
@@ -218,11 +234,16 @@ CKYStatus CKYAPDUFactory_GetBuiltinACL(CKYAPDU *apdu);
 
 CKYStatus CACAPDUFactory_SignDecrypt(CKYAPDU *apdu, CKYByte type, 
 				     const CKYBuffer *data);
-CKYStatus CACAPDUFactory_VerifyPIN(CKYAPDU *apdu, const char *pin);
+CKYStatus CACAPDUFactory_VerifyPIN(CKYAPDU *apdu, CKYByte keyRef,
+				   const char *pin);
 CKYStatus CACAPDUFactory_GetCertificate(CKYAPDU *apdu, CKYSize size);
 CKYStatus CACAPDUFactory_ReadFile(CKYAPDU *apdu, unsigned short offset, 
 				  CKYByte type, CKYByte count);
 CKYStatus CACAPDUFactory_GetProperties(CKYAPDU *apdu);
+CKYStatus PIVAPDUFactory_GetData(CKYAPDU *apdu, const CKYBuffer *object, 
+				CKYByte count);
+CKYStatus PIVAPDUFactory_SignDecrypt(CKYAPDU *apdu, CKYByte chain, CKYByte alg, 
+                           CKYByte key, int len, const CKYBuffer *data);
 
 CKY_END_PROTOS
 

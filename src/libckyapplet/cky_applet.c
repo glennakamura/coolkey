@@ -103,6 +103,22 @@ CKYAppletFactory_ComputeCryptOneStep(CKYAPDU *apdu, const void *param)
 }
 
 CKYStatus
+CKYAppletFactory_ComputeECCSignatureOneStep(CKYAPDU *apdu, const void *param)
+{
+    const CKYAppletArgComputeECCSignature *ccs=(const CKYAppletArgComputeECCSignature *)param;
+    return CKYAPDUFactory_ComputeECCSignatureOneStep(apdu, ccs->keyNumber,
+                        ccs->location, ccs->data, ccs->sig);
+}
+
+CKYStatus
+CKYAppletFactory_ComputeECCKeyAgreementOneStep(CKYAPDU *apdu, const void *param)
+{
+
+    const CKYAppletArgComputeECCKeyAgreement *ccs=(const CKYAppletArgComputeECCKeyAgreement *)param;
+    return CKYAPDUFactory_ComputeECCKeyAgreementOneStep(apdu, ccs->keyNumber, ccs->location, ccs->publicValue, ccs->secretKey);
+}
+
+CKYStatus
 CKYAppletFactory_CreatePIN(CKYAPDU *apdu, const void *param)
 {
     const CKYAppletArgCreatePIN *cps = (const CKYAppletArgCreatePIN *)param;
@@ -245,10 +261,25 @@ CACAppletFactory_SignDecryptFinal(CKYAPDU *apdu, const void *param)
 }
 
 CKYStatus
+PIVAppletFactory_SignDecrypt(CKYAPDU *apdu, const void *param)
+{
+    const PIVAppletArgSignDecrypt *psd = (const PIVAppletArgSignDecrypt *)param;
+    return PIVAPDUFactory_SignDecrypt(apdu, psd->chain, psd->alg, psd->key, 
+					psd->len, psd->buf);
+}
+
+CKYStatus
 CACAppletFactory_VerifyPIN(CKYAPDU *apdu, const void *param)
 {
     const char *pin=(const char *)param;
-    return CACAPDUFactory_VerifyPIN(apdu, pin);
+    return CACAPDUFactory_VerifyPIN(apdu, CAC_LOGIN_GLOBAL, pin);
+}
+
+CKYStatus
+PIVAppletFactory_VerifyPIN(CKYAPDU *apdu, const void *param)
+{
+    const char *pin=(const char *)param;
+    return CACAPDUFactory_VerifyPIN(apdu, PIV_LOGIN_LOCAL, pin);
 }
 
 CKYStatus
@@ -256,6 +287,13 @@ CACAppletFactory_GetCertificate(CKYAPDU *apdu, const void *param)
 {
     CKYSize *size=(CKYSize*)param;
     return CACAPDUFactory_GetCertificate(apdu, *size);
+}
+
+CKYStatus
+PIVAppletFactory_GetCertificate(CKYAPDU *apdu, const void *param)
+{
+    CKYBuffer *tag  =(CKYBuffer*)param;
+    return PIVAPDUFactory_GetData(apdu, tag, 0);
 }
 
 CKYStatus
@@ -324,6 +362,7 @@ CKYAppletFill_AppendBuffer(const CKYBuffer *response, CKYSize size, void *param)
     return CKYBuffer_AppendData(buf, CKYBuffer_Data(response), 
 						CKYBuffer_Size(response) -2);
 }
+
 
 CKYStatus
 CKYAppletFill_Byte(const CKYBuffer *response, CKYSize size, void *param)
@@ -725,6 +764,32 @@ CKYApplet_ComputeCryptProcess(CKYCardConnection *conn, CKYByte keyNumber,
 	&ccd, nonce, 0, CKYAppletFill_Null, NULL, apduRC);
 }
 
+/* computeECCValue returns data in the form :
+ *            len: short
+ *            data: byte[len]
+ * This fill routine returns A buffer with a copy of data and a length of len */
+static CKYStatus
+ckyAppletFill_ComputeECCValueFinal(const CKYBuffer *response,
+                                                CKYSize size, void *param)
+{
+    CKYBuffer *cbuf = (CKYBuffer *)param;
+    CKYSize respSize = CKYBuffer_Size(response);
+    CKYSize dataLen;
+
+    if (cbuf == 0) {
+        return CKYSUCCESS; /* app didn't want the result */
+    }
+    /* data response code + length code */
+    if (respSize < 4) {
+        return CKYAPDUFAIL;
+    }
+    dataLen = CKYBuffer_GetShort(response, 0);
+    if (dataLen > (respSize-4)) {
+        return CKYAPDUFAIL;
+    }
+    return CKYBuffer_Replace(cbuf, 0, CKYBuffer_Data(response)+2, dataLen);
+}
+
 /* computeCrypt returns data in the form :
  * 		len: short
  * 		data: byte[len]
@@ -872,6 +937,77 @@ fail:
     return ret;
 }
 
+CKYStatus
+CKYApplet_ComputeECCKeyAgreement(CKYCardConnection *conn, CKYByte keyNumber,
+    const CKYBuffer *publicValue, CKYBuffer *sharedSecret,
+    CKYBuffer *result, const CKYBuffer *nonce, CKYISOStatus *apduRC)
+{
+    CKYStatus ret = CKYAPDUFAIL;
+    CKYAppletArgComputeECCKeyAgreement ccd;
+    CKYBuffer    empty;
+    CKYISOStatus status;
+    /* Routine creates a sym key, should easily fit in one apdu */
+
+    CKYBuffer_InitEmpty(&empty);
+    ccd.keyNumber = keyNumber;
+    ccd.location  = CKY_DL_APDU;
+
+    if (!apduRC)
+        apduRC = &status;
+
+    if (ccd.location == CKY_DL_APDU) {
+        ccd.publicValue = publicValue;
+        ccd.secretKey  = sharedSecret;
+        ret =   CKYApplet_HandleAPDU(conn,
+                            CKYAppletFactory_ComputeECCKeyAgreementOneStep, &ccd, nonce,
+                            CKY_SIZE_UNKNOWN, ckyAppletFill_ComputeECCValueFinal,
+                            result, apduRC);
+        if (ret == CKYAPDUFAIL && *apduRC == CKYISO_INCORRECT_P2) {
+            return ret;
+        }
+    } 
+
+    return ret;
+}
+
+CKYStatus
+CKYApplet_ComputeECCSignature(CKYCardConnection *conn, CKYByte keyNumber,
+    const CKYBuffer *data, CKYBuffer *sig,
+    CKYBuffer *result, const CKYBuffer *nonce, CKYISOStatus *apduRC)
+{
+    int         use2APDUs = 0;
+    int         use_dl_object =  0; 
+    short       dataSize = 0;
+    CKYStatus ret = CKYAPDUFAIL;
+    CKYAppletArgComputeECCSignature ccd;
+    CKYBuffer    empty;
+    CKYISOStatus status;
+
+    CKYBuffer_InitEmpty(&empty);
+    ccd.keyNumber = keyNumber;
+
+    /* Assume APDU, the signature can only get so big with our key sizes, ~ 130 for 521 bit key. */
+    ccd.location  = CKY_DL_APDU;
+
+    if (!apduRC)
+        apduRC = &status;
+
+    if (ccd.location == CKY_DL_APDU) {
+        ccd.data = data;
+        ccd.sig  = sig;
+        ret =   CKYApplet_HandleAPDU(conn,
+                            CKYAppletFactory_ComputeECCSignatureOneStep, &ccd, nonce,
+                            CKY_SIZE_UNKNOWN, ckyAppletFill_ComputeECCValueFinal,
+                            result, apduRC);
+        if (ret == CKYAPDUFAIL && *apduRC == CKYISO_INCORRECT_P2) {
+            return ret;
+        }
+
+    } 
+
+    return ret;
+}
+
 /*
  * do a CAC Sign/Decrypt
  */
@@ -920,7 +1056,7 @@ done:
  * do a CAC VerifyPIN
  */
 CKYStatus
-CACApplet_VerifyPIN(CKYCardConnection *conn, const char *pin, 
+CACApplet_VerifyPIN(CKYCardConnection *conn, const char *pin, int local,
 		    CKYISOStatus *apduRC)
 {
     CKYStatus ret;
@@ -929,7 +1065,7 @@ CACApplet_VerifyPIN(CKYCardConnection *conn, const char *pin,
 	apduRC = &status;
     }
 
-    ret = CKYApplet_HandleAPDU(conn, 
+    ret = CKYApplet_HandleAPDU(conn, local ? PIVAppletFactory_VerifyPIN :
 			    CACAppletFactory_VerifyPIN, pin, NULL, 
 			    0, CKYAppletFill_Null, 
 			    NULL, apduRC);
@@ -941,6 +1077,7 @@ CACApplet_VerifyPIN(CKYCardConnection *conn, const char *pin,
     }
     return ret;
 }
+
 
 /*
  * Get a CAC Certificate 
@@ -1078,6 +1215,278 @@ CACApplet_GetCertificateAppend(CKYCardConnection *conn, CKYBuffer *cert,
     return ret;
 }
 
+/* Select the PIV applet */
+static CKYByte pivAid[] = {0xa0, 0x00, 0x00, 0x03, 0x08, 0x00, 0x00, 
+			   0x10, 0x00};
+CKYStatus
+PIVApplet_Select(CKYCardConnection *conn, CKYISOStatus *apduRC)
+{
+    CKYStatus ret;
+    CKYBuffer PIV_Applet_AID,return_AID;
+    
+    CKYBuffer_InitEmpty(&return_AID);
+    CKYBuffer_InitFromData(&PIV_Applet_AID, pivAid, sizeof(pivAid));
+    ret = CKYApplet_HandleAPDU(conn, CKYAppletFactory_SelectFile, 
+		 &PIV_Applet_AID,
+		 NULL, CKY_SIZE_UNKNOWN, CKYAppletFill_AppendBuffer, 
+		 &return_AID, apduRC);
+    /* Some cards return OK, but don't switch to our applet */
+    /* PIV has a well defined return for it's select, check to see if we have
+     * a PIV card here */
+    if (CKYBuffer_GetChar(&return_AID,0) != 0x61) {
+	/* not an application property template, so not a PIV. We could
+	 * check that the aid tag (0x4f) and theallocation authority tag (0x79)
+	 * are present, but what we are really avoiding is broken cards that
+	 * lie about being able to switch to a particular applet, so the first
+	 * tag should be sufficient */
+	ret = CKYAPDUFAIL; /* what we should have gotten */
+    }
+    CKYBuffer_FreeData(&PIV_Applet_AID);
+    CKYBuffer_FreeData(&return_AID);
+    return ret;
+}
+
+/*
+ * Get a PIV Certificate 
+ */
+CKYStatus
+PIVApplet_GetCertificate(CKYCardConnection *conn, CKYBuffer *cert, int tag,
+		    CKYISOStatus *apduRC)
+{
+    CKYStatus ret;
+    CKYISOStatus status;
+    CKYBuffer tagBuf;
+
+    CKYBuffer_InitEmpty(&tagBuf);
+    CKYBuffer_Reserve(&tagBuf,4); /* can be up to 4 bytes */
+
+    CKYBuffer_Resize(cert,0);
+    if (apduRC == NULL) {
+	apduRC = &status;
+    }
+    if (tag >= 0x01000000) {
+	ret = CKYBuffer_AppendChar(&tagBuf, (tag >> 24) & 0xff);
+        if (ret != CKYSUCCESS) { goto loser; }
+    }
+    if (tag >= 0x010000) {
+	ret = CKYBuffer_AppendChar(&tagBuf, (tag >> 16) & 0xff);
+        if (ret != CKYSUCCESS) { goto loser; }
+    }
+    if (tag >= 0x0100) {
+	ret =CKYBuffer_AppendChar(&tagBuf, (tag >> 8) & 0xff);
+        if (ret != CKYSUCCESS) { goto loser; }
+    }
+    ret = CKYBuffer_AppendChar(&tagBuf, tag  & 0xff);
+    if (ret != CKYSUCCESS) { goto loser; }
+	
+
+    ret = CKYApplet_HandleAPDU(conn, 
+			    PIVAppletFactory_GetCertificate, &tagBuf, NULL, 
+			    CKY_SIZE_UNKNOWN, CKYAppletFill_AppendBuffer, cert,
+			    apduRC);
+loser:
+    CKYBuffer_FreeData(&tagBuf);
+
+    return ret;
+}
+
+
+/*
+ * record the next ber tag and length. NOTE: this is a state machine.
+ * we can handle the case where we are passed the data just one byte
+ * at a time.
+ */
+static CKYStatus
+pivUnwrap(const CKYBuffer *buf, CKYOffset *offset, 
+		 CKYSize *dataSize, PIVUnwrapState *unwrap)
+{
+    if (unwrap->tag == 0) {
+	unwrap->tag = CKYBuffer_GetChar(buf, *offset);
+	if (unwrap->tag == 0) unwrap->tag = 0xff;
+	(*offset)++;
+	(*dataSize)--;
+    }
+    if (*dataSize == 0) {
+	return CKYSUCCESS;
+    }
+    if (unwrap->length_bytes != 0) {
+	int len;
+	if (unwrap->length_bytes == -1) {
+	    len = CKYBuffer_GetChar(buf, *offset);
+	    unwrap->length_bytes = 0;
+	    unwrap->length = len;
+	    (*offset)++;
+	    (*dataSize)--;
+	    if (len & 0x80) {
+		unwrap->length = 0;
+		unwrap->length_bytes = len & 0x7f;
+	    }
+	}
+	while ((*dataSize != 0) && (unwrap->length_bytes != 0)) {
+		len = CKYBuffer_GetChar(buf, *offset);
+		(*offset) ++;
+		(*dataSize) --;
+		unwrap->length = ((unwrap->length) << 8 | len);
+		unwrap->length_bytes--;
+	}
+    }
+    return CKYSUCCESS;
+}
+
+/*
+ * Remove the BER wrapping first...
+ */
+static CKYStatus
+pivAppletFill_AppendUnwrapBuffer(const CKYBuffer *response, 
+				 CKYSize size, void *param)
+{
+    PIVAppletRespSignDecrypt *prsd = (PIVAppletRespSignDecrypt *)param;
+    CKYBuffer *buf = prsd->buf;
+    CKYSize dataSize = CKYBuffer_Size(response);
+    CKYOffset offset = 0;
+
+    if (dataSize <= 2) {
+	return CKYSUCCESS;
+    }
+    dataSize -= 2;
+    /* remove the first tag */
+    (void) pivUnwrap(response, &offset, &dataSize, &prsd->tag_1);
+    if (dataSize == 0) {
+	return CKYSUCCESS;
+    }
+    /* remove the second tag */
+    (void) pivUnwrap(response, &offset, &dataSize, &prsd->tag_2);
+    if (dataSize == 0) {
+	return CKYSUCCESS;
+    }
+    /* the rest is real data */
+    return CKYBuffer_AppendData(buf, CKYBuffer_Data(response) + offset, 
+						dataSize);
+}
+
+static CKYStatus
+piv_wrapEncodeLength(CKYBuffer *buf, int length, int ber_len)
+{
+    if (ber_len== 1) {
+	CKYBuffer_AppendChar(buf,length);
+    } else {
+	ber_len--;
+	CKYBuffer_AppendChar(buf,0x80+ber_len);
+	while(ber_len--) {
+	    CKYBuffer_AppendChar(buf,(length >> (8*ber_len)) & 0xff);
+ 	}
+    }
+    return CKYSUCCESS;
+}
+/*
+ * do a PIV Sign/Decrypt
+ */
+CKYStatus
+PIVApplet_SignDecrypt(CKYCardConnection *conn, CKYByte key, unsigned int keySize, int derive,
+		const CKYBuffer *data, CKYBuffer *result, CKYISOStatus *apduRC)
+{
+    CKYStatus ret;
+    CKYSize dataSize = CKYBuffer_Size(data);
+    CKYSize outputSize = keySize;
+    CKYOffset offset = 0;
+    CKYBuffer tmp;
+    CKYByte  alg;
+    int ber_len_1;
+    int ber_len_2;
+    int length;
+    PIVAppletArgSignDecrypt pasd; 
+    PIVAppletRespSignDecrypt prsd; 
+
+    /* PIV only defines RSA 1024 and 2048, ECC 256 and ECC 384!!! */
+    if (keySize == 128) { /* 1024 bit == 128 bytes */
+	ber_len_2 = 2;
+	ber_len_1 = 2;
+	alg = 0x6;
+    } else if (keySize == 256) { /* 2048 bits == 256 bytes */
+	ber_len_2 = 3;
+	ber_len_1 = 3;
+	alg = 0x7;
+    } else if (keySize == 32) {  /* 256 bits = 32 bytes */
+	ber_len_2 = 1;
+	ber_len_1 = 1;
+	alg = 0x11;
+	if (!derive) outputSize = keySize*2;
+    } else if (keySize == 48) {  /* 384 bits = 48 bytes */
+	ber_len_2 = 1;
+	ber_len_1 = 1;
+	alg = 0x14;
+	if (!derive) outputSize = keySize*2;
+    } else {
+	return CKYINVALIDARGS; 
+    }
+
+    CKYBuffer_InitEmpty(&tmp);
+    ret = CKYBuffer_Reserve(&tmp, CKY_MAX_WRITE_CHUNK_SIZE);
+    if (ret != CKYSUCCESS) {
+	goto done;
+    }
+    CKYBuffer_AppendChar(&tmp,0x7c);
+    piv_wrapEncodeLength(&tmp,dataSize + ber_len_2 + 3,ber_len_1);
+    CKYBuffer_AppendChar(&tmp,0x82);
+    CKYBuffer_AppendChar(&tmp,0x0);
+    CKYBuffer_AppendChar(&tmp, derive ? 0x85 : 0x81);
+    piv_wrapEncodeLength(&tmp,dataSize,ber_len_2);
+
+    /* now length == header length from here to the end*/
+    length = CKYBuffer_Size(&tmp);
+
+    if (length + dataSize > CKY_MAX_WRITE_CHUNK_SIZE) {
+	CKYBuffer_AppendBuffer(&tmp, data, 0, CKY_MAX_WRITE_CHUNK_SIZE-length);
+    } else {
+	CKYBuffer_AppendBuffer(&tmp, data, 0, dataSize);
+    }
+
+    prsd.tag_1.tag = 0;
+    prsd.tag_1.length_bytes = -1;
+    prsd.tag_1.length = 0;
+    prsd.tag_2.tag = 0;
+    prsd.tag_2.length_bytes = -1;
+    prsd.tag_2.length = 0;
+    prsd.buf = result;
+    pasd.alg = alg;
+    pasd.key = key;
+    pasd.buf = &tmp;
+
+    CKYBuffer_Resize(result,0);
+    for(offset = -length; (dataSize-offset) > CKY_MAX_WRITE_CHUNK_SIZE; ) {
+	pasd.chain = 1;
+	pasd.len = 0;
+        ret = CKYApplet_HandleAPDU(conn, PIVAppletFactory_SignDecrypt, 
+			    &pasd, NULL, CKY_SIZE_UNKNOWN, 
+			    pivAppletFill_AppendUnwrapBuffer, 
+			    &prsd, apduRC);
+	if (ret != CKYSUCCESS) {
+	    goto done;
+	}
+	CKYBuffer_Resize(&tmp,0);
+	/* increment before we append the next tmp buffer */
+	offset += CKY_MAX_WRITE_CHUNK_SIZE;
+	CKYBuffer_AppendBuffer(&tmp, data, offset,
+			MIN(dataSize-offset, CKY_MAX_WRITE_CHUNK_SIZE));
+    }
+
+    pasd.chain = 0;
+    pasd.len = outputSize;
+
+    ret = CKYApplet_HandleAPDU(conn, PIVAppletFactory_SignDecrypt, 
+			    &pasd, NULL, CKY_SIZE_UNKNOWN, 
+			    pivAppletFill_AppendUnwrapBuffer, 
+			    &prsd, apduRC);
+
+    if ((ret == CKYSUCCESS) && (CKYBuffer_Size(result) != outputSize)) {
+	/* RSA returns the same data size as input, didn't happen, so
+	 * something is wrong. */
+    }
+
+done:
+    CKYBuffer_FreeData(&tmp);
+    return ret;
+}
 
 /*
  * PIN cluster
