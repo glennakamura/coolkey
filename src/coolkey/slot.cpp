@@ -4185,11 +4185,30 @@ Slot::signInit(SessionHandleSuffix suffix, CK_MECHANISM_PTR pMechanism,
 {
     refreshTokenState();
     SessionIter session = findSession(suffix);
+    PKCS11Object *key = getKeyFromHandle(hKey);
     if( session == sessions.end() ) {
         throw PKCS11Exception(CKR_SESSION_HANDLE_INVALID);
     }
+    if (pMechanism == NULL) {
+        throw PKCS11Exception(CKR_ARGUMENTS_BAD);
+    }
 
-    session->signatureState.initialize(getKeyFromHandle(hKey));
+    switch (pMechanism->mechanism) {
+    case CKM_RSA_PKCS:
+	if (key->getKeyType() != Key::rsa) {
+        	throw PKCS11Exception(CKR_KEY_TYPE_INCONSISTENT);
+	}
+	break;
+    case CKM_ECDSA:
+	if (key->getKeyType() != Key::ecc) {
+        	throw PKCS11Exception(CKR_KEY_TYPE_INCONSISTENT);
+	}
+	break;
+    default:
+        throw PKCS11Exception(CKR_MECHANISM_INVALID);
+    }
+
+    session->signatureState.initialize(key);
 }
 
 void
@@ -4198,11 +4217,24 @@ Slot::decryptInit(SessionHandleSuffix suffix, CK_MECHANISM_PTR pMechanism,
 {
     refreshTokenState();
     SessionIter session = findSession(suffix);
+    PKCS11Object *key = getKeyFromHandle(hKey);
     if( session == sessions.end() ) {
         throw PKCS11Exception(CKR_SESSION_HANDLE_INVALID);
     }
+    if (pMechanism == NULL) {
+        throw PKCS11Exception(CKR_ARGUMENTS_BAD);
+    }
+    switch (pMechanism->mechanism) {
+    case CKM_RSA_PKCS:
+	if (key->getKeyType() != Key::rsa) {
+        	throw PKCS11Exception(CKR_KEY_TYPE_INCONSISTENT);
+	}
+	break;
+    default:
+        throw PKCS11Exception(CKR_MECHANISM_INVALID);
+    }
 
-    session->decryptionState.initialize(getKeyFromHandle(hKey));
+    session->decryptionState.initialize(key);
 }
 
 /**
@@ -5008,8 +5040,23 @@ Slot::derive(SessionHandleSuffix suffix, CK_MECHANISM_PTR pMechanism,
 
     ECCKeyAgreementParams params(CryptParams::ECC_DEFAULT_KEY_SIZE);
     SessionIter session = findSession(suffix);
+    PKCS11Object *key=getKeyFromHandle(hBaseKey);
 
-    session->keyAgreementState.initialize(getKeyFromHandle(hBaseKey));
+    if (pMechanism == NULL ) {
+        throw PKCS11Exception(CKR_ARGUMENTS_BAD);
+    }
+
+    switch (pMechanism->mechanism) {
+    case CKM_ECDH1_DERIVE:
+	if (key->getKeyType() != Key::ecc) {
+        	throw PKCS11Exception(CKR_KEY_TYPE_INCONSISTENT);
+	}
+	break;
+    default:
+        throw PKCS11Exception(CKR_MECHANISM_INVALID);
+    }
+
+    session->keyAgreementState.initialize(key);
     deriveECC(suffix, pMechanism, hBaseKey, pTemplate, ulAttributeCount, 
 		phKey, params);
 
@@ -5018,9 +5065,6 @@ Slot::derive(SessionHandleSuffix suffix, CK_MECHANISM_PTR pMechanism,
 void Slot::deriveECC(SessionHandleSuffix suffix, CK_MECHANISM_PTR pMechanism,
        CK_OBJECT_HANDLE hBaseKey, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulAttributeCount, CK_OBJECT_HANDLE_PTR phKey, CryptParams& params)
 {
-    if (pMechanism == NULL ) {
-        throw PKCS11Exception(CKR_ARGUMENTS_BAD);
-    }
 
     CK_ECDH1_DERIVE_PARAMS *mechParams      = NULL;
 

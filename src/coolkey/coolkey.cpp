@@ -77,7 +77,8 @@ rsaMechanismList[] = {
 
 static const MechInfo
 ecMechanismList[] = {
-    {CKM_ECDSA,{256,521,CKF_HW | CKF_SIGN | CKF_EC_F_P}},{ CKM_ECDSA_SHA1, {256, 521, CKF_HW | CKF_SIGN | CKF_EC_F_P}},{ CKM_ECDH1_DERIVE,{256, 521, CKF_HW | CKF_DERIVE | CKF_EC_F_P} }
+    {CKM_ECDSA,{256,521,CKF_HW | CKF_SIGN | CKF_EC_F_P}},
+    {CKM_ECDH1_DERIVE,{256, 521, CKF_HW | CKF_DERIVE | CKF_EC_F_P} }
 };
 
 unsigned int numRSAMechanisms = sizeof(rsaMechanismList)/sizeof(MechInfo);
