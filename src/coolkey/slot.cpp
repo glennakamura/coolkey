@@ -415,8 +415,9 @@ Slot::Slot(const char *readerName_, Log *log_, CKYCardContext* context_)
 	tokenManufacturer(NULL),
 	slotInfoFound(false), context(context_), conn(NULL), state(UNKNOWN), 
 	isVersion1Key(false), needLogin(false), fullTokenName(false), 
-	mCoolkey(false), mOldCAC(false), mCACLocalLogin(false),
-	pivContainer(-1), pivKey(-1), maxCacCerts(MAX_CERT_SLOTS), 
+	mCoolkey(false), mOldCAC(false), mCACLocalLogin(false), mCAC_ACA(false),
+	pivContainer(-1), pivKey(-1),
+	minCacCerts(0), maxCacCerts(MAX_CERT_SLOTS),
 	algs(ALG_NONE), p15aid(0), p15odfAddr(0), p15tokenInfoAddr(0),
 	p15Instance(0),
 #ifdef USE_SHMEM
@@ -782,9 +783,11 @@ Slot::connectToToken()
 	 state |= PIV_CARD | APPLET_SELECTABLE | APPLET_PERSONALIZED;
 	 isVersion1Key = 0;
 	 needLogin = true;
+	 minCacCerts = 0;
 	 maxCacCerts = MAX_CERT_SLOTS;
          mCoolkey = 0;
 	 mOldCAC = 0;
+	 mCAC_ACA = 0;
 	 mCACLocalLogin = getPIVLoginType();
 	return;
     } 
@@ -924,23 +927,29 @@ Slot::getCACAid()
 	CKYBuffer_Resize(&cardAID[i],0);
     }
 
+    mCAC_ACA=false;
     status = CACApplet_SelectCCC(conn,NULL);
     if (status != CKYSUCCESS) {
 	/* are we an old CAC */
-	status = CACApplet_SelectPKI(conn, &cardAID[0], 0, NULL);
-	if (status != CKYSUCCESS) {
-	   /* no, just fail */
-	   return status;
-	}
-	/* yes, fill in the old applets */
-	mOldCAC = true;
-	maxCacCerts = 1;
-	for (i=1; i< MAX_CERT_SLOTS; i++) {
+	maxCacCerts = 0;
+	minCacCerts = -1;
+        status = CACApplet_SelectACA(conn,NULL);
+        if (status == CKYSUCCESS) {
+	    mCAC_ACA = true;
+        }
+	for (i=0; i< MAX_CERT_SLOTS; i++) {
 	    status = CACApplet_SelectPKI(conn, &cardAID[i], i, NULL);
 	    if (status == CKYSUCCESS) {
+		if (minCacCerts == -1) {
+		    minCacCerts = i;
+                }
 		maxCacCerts = i+1;
 	    }
 	}
+	if (minCacCerts == -1) {
+	    return status;
+        }
+	mOldCAC = true;
 	return CKYSUCCESS;
     }
     /* definately not an old CAC */
@@ -997,6 +1006,7 @@ Slot::getCACAid()
     if (certSlot == 0) {
 	status = CKYAPDUFAIL; /* probably neeed a beter error code */
     }
+    minCacCerts = 0;
     maxCacCerts = certSlot;
 
 done:
@@ -3840,7 +3850,16 @@ Slot::login(SessionHandleSuffix handleSuffix, CK_USER_TYPE user,
     if(status != CKYSUCCESS ) handleConnectionError();
 
     if (state & GOV_CARD) {
-	selectCACApplet(0, true);
+	if (mCAC_ACA) {
+            status = CACApplet_SelectACA(conn,NULL);
+	    if ( status == CKYSCARDERR ) handleConnectionError();
+	    if ( status != CKYSUCCESS) {
+		disconnect();
+        	throw PKCS11Exception(CKR_DEVICE_REMOVED);
+	    }
+	} else {
+	    selectCACApplet(minCacCerts, true);
+	}
     } else if ((state & P15_CARD)== 0) {
 	/* p15 does the select in attemptLogin */
 	selectApplet();

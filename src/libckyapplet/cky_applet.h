@@ -539,6 +539,8 @@ CKYStatus CACApplet_SelectCardManager(CKYCardConnection *conn,
 							CKYISOStatus *apduRC);
 /* Select the CAC CC container. Can happen with either applet selected */
 CKYStatus CACApplet_SelectCCC(CKYCardConnection *conn, CKYISOStatus *apduRC);
+/* Select the CAC ACA container. Can happen with either applet selected */
+CKYStatus CACApplet_SelectACA(CKYCardConnection *conn, CKYISOStatus *apduRC);
 /* Select an old CAC applet and fill in the cardAID */
 CKYStatus CACApplet_SelectPKI(CKYCardConnection *conn, CKYBuffer *cardAid,
 			      CKYByte instance, CKYISOStatus *apduRC);

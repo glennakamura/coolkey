@@ -356,8 +356,10 @@ class Slot {
     bool mCoolkey;
     bool mOldCAC;
     bool mCACLocalLogin;
+    bool mCAC_ACA;
     int pivContainer;
     int pivKey;
+    int minCacCerts;
     int maxCacCerts;
     SlotAlgs algs;
     unsigned short p15aid;

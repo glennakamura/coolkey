@@ -626,6 +626,19 @@ CACApplet_SelectCCC(CKYCardConnection *conn, CKYISOStatus *apduRC)
     return ret;
 }
 
+static CKYByte cacACAid[] = {0xa0, 0x00, 0x00, 0x00, 0x79, 0x10, 0x00 };
+CKYStatus
+CACApplet_SelectACA(CKYCardConnection *conn, CKYISOStatus *apduRC)
+{
+    CKYStatus ret;
+    CKYBuffer CAC_CM_AID;
+    CKYBuffer_InitFromData(&CAC_CM_AID, cacACAid, sizeof(cacACAid));
+    ret = CKYApplet_HandleAPDU(conn, CKYAppletFactory_SelectFile, &CAC_CM_AID,
+		 NULL, CKY_SIZE_UNKNOWN, CKYAppletFill_Null, NULL, apduRC);
+    CKYBuffer_FreeData(&CAC_CM_AID);
+    return ret;
+}
+
 CKYStatus
 CACApplet_SelectFile(CKYCardConnection *conn, unsigned short ef,
 						 CKYISOStatus *apduRC)
