@@ -203,6 +203,29 @@ SlotList::readerExists(const char *readerName, unsigned int *hint)
     return FALSE;
 }
 
+bool
+SlotList::readerNameExistsInList(const char *readerName,CKYReaderNameList *readerNameList)
+{
+    if( !readerName || !readerNameList) {
+        return FALSE;
+    }
+
+    int i = 0;
+    int readerNameCnt = CKYReaderNameList_GetCount(*readerNameList);
+
+    const char *curReaderName = NULL;
+    for(i=0; i < readerNameCnt; i++) {
+        curReaderName = CKYReaderNameList_GetValue(*readerNameList,i);
+
+        if(!strcmp(curReaderName,readerName)) {
+            return TRUE;
+        }
+        
+    }
+    
+    return FALSE;
+}
+
 /*
  * you need to hold the ReaderList Lock before you can update the ReaderList
  */
@@ -255,6 +278,27 @@ SlotList::updateReaderList()
      * new readers is to see if there are any readers on the list that we
      * don't recognize.
      */
+
+    /* first though, let's check to see if any previously removed readers have 
+     * come back from the dead. If the ignored bit has been set, we do not need
+     * it any more.
+    */
+
+    const char *curReaderName = NULL;
+    unsigned long knownState = 0;
+    for(int ri = 0 ; ri < numReaders; ri ++)  {
+       
+        knownState = CKYReader_GetKnownState(&readerStates[ri]);
+        if( !(knownState & SCARD_STATE_IGNORE))  {
+            continue;
+        }
+ 
+        curReaderName =  CKYReader_GetReaderName(&readerStates[ri]); 
+        if(readerNameExistsInList(curReaderName,&readerNames)) {
+            CKYReader_SetKnownState(&readerStates[ri], knownState & ~SCARD_STATE_IGNORE); 
+                 
+        }
+    } 
 
     const char *newReadersData[MAX_READER_DELTA];
     const char **newReaders = &newReadersData[0];
@@ -528,7 +572,7 @@ SlotList::getSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList,
 void
 Slot::connectToToken()
 {
-    CKYStatus status;
+    CKYStatus status = CKYSCARDERR;
     OSTime time = OSTimeNow();
 
     mCoolkey = 0;
@@ -537,13 +581,31 @@ Slot::connectToToken()
 
     // try to connect to the card
     if( ! CKYCardConnection_IsConnected(conn) ) {
-        status = CKYCardConnection_Connect(conn, readerName);
-        if( status != CKYSUCCESS ) {
-            log->log("Unable to connect to token\n");
+        int i = 0;
+    //for cranky readers try again a few more times
+        while( i++ < 5 && status != CKYSUCCESS )
+        {
+            status = CKYCardConnection_Connect(conn, readerName);
+            if( status != CKYSUCCESS && 
+                CKYCardConnection_GetLastError(conn) == SCARD_E_PROTO_MISMATCH ) 
+            {
+                log->log("Unable to connect to token status %d ConnGetGetLastError %x .\n",status,CKYCardConnection_GetLastError(conn));
+
+            }
+            else
+            {
+                break;
+            }
+            OSSleep(100000);
+        }
+
+        if( status != CKYSUCCESS)
+        {
             state = UNKNOWN;
             return;
         }
     }
+
     log->log("time connect: Connect Time %d ms\n", OSTimeNow() - time);
     if (!slotInfoFound) {
 	readSlotInfo();
@@ -562,15 +624,10 @@ Slot::connectToToken()
         state = CARD_PRESENT;
     }
 
-    if ( CKYBuffer_DataIsEqual(&cardATR, ATR, sizeof (ATR)) || 
-		CKYBuffer_DataIsEqual(&cardATR, ATR1, sizeof(ATR1)) ||
-		CKYBuffer_DataIsEqual(&cardATR, ATR2, sizeof(ATR2)) ) {
-
-        if (Params::hasParam("noAppletOK"))
-        {      
-            state |=  APPLET_SELECTABLE;
-	    mCoolkey = 1;
-        }
+    if (Params::hasParam("noAppletOK"))
+    {      
+        state |=  APPLET_SELECTABLE;
+	mCoolkey = 1;
     }
 
     /* support CAC card. identify the card based on applets, not the ATRS */
@@ -631,7 +688,7 @@ Slot::connectToToken()
          * unfriendly */
 	isVersion1Key = 0;
 	needLogin = 1;
-
+        mCoolkey = 0;
 	return;
     }
     mCoolkey = 1;
@@ -1077,6 +1134,7 @@ SlotList::waitForSlotEvent(CK_FLAGS flag, CK_SLOT_ID_PTR slotp, CK_VOID_PTR res)
 	    }
 	    throw;
 	}
+
 	if (myNumReaders != numReaders) {
 	    if (myReaderStates) {
 		delete [] myReaderStates;
@@ -1103,6 +1161,7 @@ SlotList::waitForSlotEvent(CK_FLAGS flag, CK_SLOT_ID_PTR slotp, CK_VOID_PTR res)
 		}
 	    }
 	}
+
         if (found || (flag == CKF_DONT_BLOCK) || shuttingDown) {
             break;
         }
@@ -1269,6 +1328,19 @@ class ObjectHandleMatch {
     ObjectHandleMatch(CK_OBJECT_HANDLE handle_) : handle(handle_) { }
     bool operator()(const PKCS11Object& obj) {
         return obj.getHandle() == handle;
+    }
+};
+
+class KeyNumMatch {
+  private:
+    CKYByte keyNum;
+    const Slot &slot;
+  public:
+    KeyNumMatch(CKYByte keyNum_, const Slot &s) : keyNum(keyNum_), slot(s) { }
+    bool operator() (const PKCS11Object& obj) {
+        unsigned long objID = obj.getMuscleObjID();
+        return (slot.getObjectClass(objID) == 'k')
+               && (slot.getObjectIndex(objID) == keyNum);
     }
 };
 
@@ -3007,8 +3079,9 @@ Slot::sign(SessionHandleSuffix suffix, CK_BYTE_PTR pData,
         CK_ULONG ulDataLen, CK_BYTE_PTR pSignature,
         CK_ULONG_PTR pulSignatureLen)
 {
+    RSASignatureParams params(CryptParams::DEFAULT_KEY_SIZE);
     cryptRSA(suffix, pData, ulDataLen, pSignature, pulSignatureLen,
-        RSASignatureParams(CryptParams::FIXED_KEY_SIZE));
+        params);
 }
 
 void
@@ -3016,14 +3089,15 @@ Slot::decrypt(SessionHandleSuffix suffix, CK_BYTE_PTR pData,
         CK_ULONG ulDataLen, CK_BYTE_PTR pDecryptedData,
         CK_ULONG_PTR pulDecryptedDataLen)
 {
+    RSADecryptParams params(CryptParams::DEFAULT_KEY_SIZE);
     cryptRSA(suffix, pData, ulDataLen, pDecryptedData, pulDecryptedDataLen,
-        RSADecryptParams(CryptParams::FIXED_KEY_SIZE));
+        params);
 }
 
 void
 Slot::cryptRSA(SessionHandleSuffix suffix, CK_BYTE_PTR pInput,
         CK_ULONG ulInputLen, CK_BYTE_PTR pOutput,
-        CK_ULONG_PTR pulOutputLen, const CryptParams& params)
+        CK_ULONG_PTR pulOutputLen, CryptParams& params)
 {
     refreshTokenState();
     SessionIter session = findSession(suffix);
@@ -3040,6 +3114,11 @@ Slot::cryptRSA(SessionHandleSuffix suffix, CK_BYTE_PTR pInput,
     CryptOpState& opState = params.getOpState(*session);
     CKYBuffer *result = &opState.result;
     CKYByte keyNum = opState.keyNum;
+
+    unsigned int keySize = getKeySize(keyNum);
+
+    if(keySize != CryptParams::DEFAULT_KEY_SIZE)
+        params.setKeySize(keySize);
 
     if( CKYBuffer_Size(result) == 0 ) {
         // we haven't already peformed the decryption, so do it now.
@@ -3242,4 +3321,37 @@ Slot::generateRandom(SessionHandleSuffix suffix, const CK_BYTE_PTR pData,
 	}
 	throw PKCS11Exception(CKR_DEVICE_ERROR);
     }
+}
+
+#define MAX_NUM_KEYS 8
+unsigned int
+Slot::getKeySize(CKYByte keyNum)
+{
+    unsigned int keySize = CryptParams::DEFAULT_KEY_SIZE;
+    int modSize = 0;
+
+    if(keyNum >= MAX_NUM_KEYS) {
+        return keySize;
+    }
+
+    ObjectConstIter iter;
+    iter = find_if(tokenObjects.begin(), tokenObjects.end(),
+        KeyNumMatch(keyNum,*this));
+
+    if( iter == tokenObjects.end() ) {
+        return keySize;
+    }
+
+    CKYBuffer const *modulus = iter->getAttribute(CKA_MODULUS);
+
+    if(modulus) {
+        modSize = CKYBuffer_Size(modulus);
+        if(CKYBuffer_GetChar(modulus,0) == 0x0) {
+            modSize--;
+        }
+        if(modSize > 0)
+            keySize = modSize * 8;
+    }
+
+    return keySize;
 }
