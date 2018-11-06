@@ -25,7 +25,6 @@ if BUILD_PK11INSTALL
 SUBDIRS += src/install
 endif
 
-ACLOCAL_AMFLAGS = -I m4
 
 EXTRA_DIST = cookey.spec LICENSE
 
