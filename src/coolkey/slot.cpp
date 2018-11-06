@@ -2185,6 +2185,7 @@ Slot::readCACCertificateFirst(CKYBuffer *cert, CKYSize *nextSize,
 {
     CKYStatus status;
     CKYISOStatus apduRC;
+    *nextSize = 0;
 
     if (mOldCAC) {
 	/* get the first 100 bytes of the cert */
