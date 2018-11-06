@@ -78,9 +78,9 @@ case "$host" in
 	PCSC_MSG=yes
 	PCSC_CFLAGS="-I/System/Library/Frameworks/PCSC.framework/Versions/Current/Headers"
 	PCSC_LIBS="-Wl,-framework,PCSC"
-	CFLAGS="-DMAC  -I/System/Library/Frameworks/Security.framework/Versions/Current/Headers -isysroot /Developer/SDKs/MacOSX10.5.sdk -arch ppc -arch i386"
-	LDFLAGS="-L/System/Library/Frameworks/Security.framework/Versions/Current/Security -arch ppc -arch i386"
-	CXXFLAGS="-DMAC  -I/System/Library/Frameworks/Security.framework/Versions/Current/Headers -isysroot /Developer/SDKs/MacOSX10.5.sdk -arch ppc -arch i386"
+	CFLAGS="-DMAC  -I/System/Library/Frameworks/Security.framework/Versions/Current/Headers -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"
+	LDFLAGS="-L/System/Library/Frameworks/Security.framework/Versions/Current/Security"
+	CXXFLAGS="-DMAC  -I/System/Library/Frameworks/Security.framework/Versions/Current/Headers -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"
 	;;
 *)
   	AC_MSG_RESULT([UNIX/LINUX])
