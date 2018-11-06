@@ -368,6 +368,8 @@ class Slot {
     CKYBuffer p15tokenInfo;
     CKYBuffer p15odf;
     CKYBuffer p15serialNumber;
+    CKYBuffer candidateUserAuthId;
+    CKYBuffer candidateContextSpecificAuthId;
     //enum { RW_SESSION_HANDLE = 1, RO_SESSION_HANDLE = 2 };
 
 #ifdef USE_SHMEM

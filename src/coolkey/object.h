@@ -200,9 +200,11 @@ class PKCS11Object {
     CK_USER_TYPE getUser(void) const { return user; }
     void setKeyType(KeyType theType) { keyType = theType; }
     void setKeySize(unsigned int keySize_) { keySize = keySize_; }
+    void setUser(CK_USER_TYPE user_) { user = user_; }
     const CKYBuffer *getAuthId(void) const { return &authId; }
     const CKYBuffer *getPinAuthId(void) const { return &pinAuthId; }
     const PK15ObjectPath &getObjectPath() const { return objectPath; }
+    void setObjectPath(const PK15ObjectPath &newPath) { objectPath = newPath; }
     void completeKey(const PKCS11Object &cert);
 };
 
@@ -308,6 +310,7 @@ class PK15Object : public PKCS11Object {
     bool isLocal(void) const { return 
 			(pinInfo.pinFlags & P15PinLocal) ? true : false; }
     const P15PinInfo *getPinInfo(void) const { return &pinInfo; }
+    void setPinRef(CK_BYTE pinRef) { pinInfo.pinRef = pinRef; }
 };
 
 class Reader : public PKCS11Object {

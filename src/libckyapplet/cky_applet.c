@@ -1316,8 +1316,6 @@ P15Applet_SignDecrypt(CKYCardConnection *conn, CKYByte key,
     int appendLength = length;
     int hasPad = 0;
 
-    /* Hack, lie and say we are always doing encipherment */
-    direction = CKY_DIR_DECRYPT;
     CKYBuffer_Resize(result,0);
     /*
      * first set the security environment
@@ -1367,7 +1365,7 @@ P15Applet_SignDecrypt(CKYCardConnection *conn, CKYByte key,
     }
     CKYBuffer_AppendBuffer(&tmp, data, offset, appendLength);
     pso.chain = 0;
-    pso.retLen = dataSize;
+    pso.retLen = keySize;
 
     ret = CKYApplet_HandleAPDU(conn, 
 		P15AppletFactory_PerformSecurityOperation, &pso, NULL, 

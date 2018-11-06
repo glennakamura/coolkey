@@ -32,7 +32,7 @@ const CKYByte eccOID[] = {0x2a,0x86,0x48,0xce,0x3d,0x02,0x01};
 void dump(const char *label, const CKYBuffer *buf)
 {
     CKYSize i;
-    CKYSize size = CKYBuffer_Size(buf);
+    CKYSize size = buf ? CKYBuffer_Size(buf) : 0;
 #define ROW_LENGTH 60
     char string[ROW_LENGTH+1];
     char *bp = &string[0];

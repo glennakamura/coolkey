@@ -41,6 +41,7 @@
 #define PRINTF(args)
 #endif
 // #define DISPLAY_WHOLE_GET_DATA 1
+void dump(const char *label, const CKYBuffer *buf);
 
 
 // The Cyberflex Access 32k egate ATR
@@ -467,6 +468,8 @@ Slot::Slot(const char *readerName_, Log *log_, CKYCardContext* context_)
     }
     CKYBuffer_InitEmpty(&cardATR);
     CKYBuffer_InitEmpty(&mCUID);
+    CKYBuffer_InitEmpty(&candidateUserAuthId);
+    CKYBuffer_InitEmpty(&candidateContextSpecificAuthId);
     for (int i=0; i < MAX_CERT_SLOTS; i++) {
 	CKYBuffer_InitEmpty(&cardAID[i]);
     }
@@ -540,6 +543,8 @@ Slot::~Slot()
     CKYBuffer_FreeData(&nonce);
     CKYBuffer_FreeData(&cardATR);
     CKYBuffer_FreeData(&mCUID);
+    CKYBuffer_FreeData(&candidateUserAuthId);
+    CKYBuffer_FreeData(&candidateContextSpecificAuthId);
     CKYBuffer_FreeData(&p15AID);
     CKYBuffer_FreeData(&p15odf);
     CKYBuffer_FreeData(&p15tokenInfo);
@@ -1272,6 +1277,41 @@ class ObjectKeyCKAIDMatch {
     }
 };
 
+#ifdef DEBUG
+void
+dumpPin(const char *label, const PK15Object *pin)
+{
+    const P15PinInfo *pinInfo = pin->getPinInfo();
+    const PK15ObjectPath &pinPath=pin->getObjectPath(); 
+    unsigned int pin_type = (unsigned int) pinInfo->pinType;
+    const char *pin_name[3] = {"BCD", "ASCIINum", "UTF8" };
+
+    printf("Pin Object %s\n",label);
+    printf(" Pin flags=0x%08lx\n",pinInfo->pinFlags);
+    printf(" Pin type=%d (%s)\n",(int) pin_type, 
+		pin_type < 3U ? pin_name[pin_type] :
+		"Invalid");
+    printf(" Pin length= %d (%d - %d)\n",(int)pinInfo->storedLength,
+					(int)pinInfo->minLength, 
+					(int)pinInfo->maxLength);
+    printf(" Pin pad = 0x%02x,<%c>\n", pinInfo->padChar, pinInfo->padChar);
+    printf(" Pin Ref = 0x%02x\n", pinInfo->pinRef);
+    printf(" Pin Path index = %ld\n",(long)pinPath.getIndex());
+    printf(" Pin Path size = %ld\n",(long)pinPath.getLength());
+    dump(" Pin Path:",pinPath.getPath());
+}
+
+void
+dumpPath(const char *label, const PK15ObjectPath &path) 
+{
+    printf(" Path for %s\n", label);
+    printf(" index = %ld\n",(long)path.getIndex());
+    printf(" size = %ld\n",(long)path.getLength());
+    dump(" objPath:",path.getPath());
+}
+#endif
+
+
 CKYStatus
 Slot::parseEF_Directory(const CKYByte *current, 
 					CKYSize size, PK15ObjectType type)
@@ -1326,7 +1366,22 @@ Slot::parseEF_Directory(const CKYByte *current,
 			auth[CKU_SO] = new PK15Object(obj);
 		    }
 		} else if (auth[CKU_USER] == NULL) {
+		    const CKYBuffer *authid = obj.getPinAuthId();
 		    auth[CKU_USER] = new PK15Object(obj);
+		    if ((CKYBuffer_Size(&candidateUserAuthId) != 0) 
+			&& !CKYBuffer_IsEqual(authid, &candidateUserAuthId)) {
+			/* validate our candidates */
+			if ((CKYBuffer_Size(&candidateContextSpecificAuthId)
+			     == 0) || (CKYBuffer_IsEqual(
+				&candidateContextSpecificAuthId, authid))) {
+			    CKYBuffer_Replace(&candidateContextSpecificAuthId,0,
+				CKYBuffer_Data(&candidateUserAuthId),
+			        CKYBuffer_Size(&candidateUserAuthId));
+			}
+			CKYBuffer_Replace(&candidateUserAuthId, 0,
+				CKYBuffer_Data(authid), CKYBuffer_Size(authid));
+		    }
+			
 		} else if (auth[CKU_CONTEXT_SPECIFIC] == NULL) {
 		    ObjectIter iter;
 		    const CKYBuffer *authid = obj.getPinAuthId();
@@ -1339,6 +1394,8 @@ Slot::parseEF_Directory(const CKYByte *current,
 			if( CKYBuffer_IsEqual(iter->getAuthId(),authid)) {
 			    iter->setAttributeBool(CKA_ALWAYS_AUTHENTICATE,
 						   TRUE);
+			    iter->setUser(CKU_CONTEXT_SPECIFIC);
+printf("Setting Context Specific pin on key\n");
 			}
 		    }
 		}
@@ -1349,7 +1406,19 @@ Slot::parseEF_Directory(const CKYByte *current,
 		{
 		    ObjectConstIter iter;
 		    const CKYBuffer *id;
+		    const CKYBuffer *authid;
 
+		    authid = obj.getAuthId();
+		    if (authid) {
+			if (CKYBuffer_Size(&candidateUserAuthId) == 0) {
+			    CKYBuffer_Replace(&candidateUserAuthId, 0,
+				CKYBuffer_Data(authid), CKYBuffer_Size(authid));
+			} else if (!CKYBuffer_IsEqual(&candidateUserAuthId, 
+							authid)) {
+			    CKYBuffer_Replace(&candidateContextSpecificAuthId,0,
+				CKYBuffer_Data(authid), CKYBuffer_Size(authid));
+			}
+		    }
 		    id = obj.getAttribute(CKA_ID);
 		    if ((!id) || (CKYBuffer_Size(id) != 1)) {
 			break;
@@ -1385,6 +1454,31 @@ Slot::parseEF_Directory(const CKYByte *current,
 	    }
     	    tokenObjects.push_back(obj);
   	} while ( false );
+    }
+
+    /* handle the case where we have context specific with the same user pin */
+    if ((type == PK15AuthObj) 
+		&& (CKYBuffer_Size(&candidateContextSpecificAuthId) != 0)
+		&& (auth[CKU_CONTEXT_SPECIFIC] == NULL)) {
+	ObjectIter iter;
+
+	/* these should put on the individual keys */
+	auth[CKU_CONTEXT_SPECIFIC] = new PK15Object(*auth[CKU_USER]);
+	/* set the pin ref for the context specific auth */
+	auth[CKU_CONTEXT_SPECIFIC]->setPinRef(
+	    (CK_BYTE) CKYBuffer_GetChar(&candidateContextSpecificAuthId,0));
+	for( iter = tokenObjects.begin(); iter != tokenObjects.end(); ++iter) {
+	    const CKYBuffer *authid = iter->getAuthId();
+	    if(authid && 
+		CKYBuffer_IsEqual(authid,&candidateContextSpecificAuthId)) {
+		 iter->setAttributeBool(CKA_ALWAYS_AUTHENTICATE, TRUE);
+		 iter->setUser(CKU_CONTEXT_SPECIFIC);
+		 /* auth[CKU_CONTEXT_SPECIFIC]->
+				setObjectPath(iter->getObjectPath()); */
+	    }
+	}
+	
+
     }
     CKYBuffer_FreeData(&file);
     return CKYSUCCESS;
@@ -2221,6 +2315,12 @@ Slot::unloadObjects()
 	tokenManufacturer = NULL;
     }
     CKYBuffer_Resize(&p15serialNumber,0);
+    CKYBuffer_Resize(&candidateUserAuthId,0);
+    CKYBuffer_Resize(&candidateContextSpecificAuthId,0);
+    for (int i=0; i < MAX_AUTH_USERS; i++) {
+	if (auth[i]) delete auth[i];
+	auth[i]=NULL;
+    }
 }
 
 #ifdef USE_SHMEM
@@ -3766,7 +3866,6 @@ Slot::attemptLogin(CK_USER_TYPE user, bool flushPin) {
 	contextPinCache.clearPin();
     }
 }
-void dump(const char *label, const CKYBuffer *buf);
 
 void
 Slot::attemptP15Login(CK_USER_TYPE user)
@@ -3794,7 +3893,6 @@ Slot::attemptP15Login(CK_USER_TYPE user)
 	throw PKCS11Exception(CKR_DEVICE_ERROR, "Applet select return 0x%04x",
 								result);
     }
-
     status = P15Applet_VerifyPIN(conn, 
 		(const char *)CKYBuffer_Data(pinCachePtr->get()), 
 		auth[user]->getPinInfo(), &result);
@@ -4636,7 +4734,14 @@ Slot::cryptRSA(SessionHandleSuffix suffix, CK_BYTE_PTR pInput,
 	    params.padInput(&inputPad, &input);
             performRSAOp(&output, &inputPad, params.getKeySize(), key, 
 							params.getDirection());
-	    params.unpadOutput(result, &output);
+	    if (CKYBuffer_Size(&output) < CKYBuffer_Size(&inputPad)) {
+		/* if the size is smaller than the input, treat it as 
+	         * unpadded */
+		CKYBuffer_Replace(result, 0, CKYBuffer_Data(&output),
+					CKYBuffer_Size(&output));
+	    } else {
+		params.unpadOutput(result, &output);
+	    }
 	    CKYBuffer_FreeData(&input);
 	    CKYBuffer_FreeData(&inputPad);
 	    CKYBuffer_FreeData(&output);
@@ -4787,9 +4892,8 @@ retry:
     } else if (state & CAC_CARD) {
         status = CACApplet_SignDecrypt(conn, input, output, &result);
     } else if (state & P15_CARD) {
-	status = P15Applet_SignDecrypt(conn, key->getKeyRef(), keySize/8,
+	status = P15Applet_SignDecrypt(conn, key->getKeyRef(), (keySize/8)*2,
 				CKY_DIR_ENCRYPT, input, output, &result); 
-	
     } else {
         status = CKYApplet_ComputeECCSignature(conn, objectToKeyNum(key), 					input, NULL, output, getNonce(), &result);
     }
@@ -4861,8 +4965,32 @@ retry:
     } else if (state & CAC_CARD) {
         status = CACApplet_SignDecrypt(conn, input, output, &result);
     } else if (state & P15_CARD) {
-	status = P15Applet_SignDecrypt(conn, key->getKeyRef(), keySize/8,
-				direction, input, output, &result);
+	if (direction == CKY_DIR_DECRYPT) {
+	    status = P15Applet_SignDecrypt(conn, key->getKeyRef(), 
+			keySize/8, direction, input, output, &result);
+	} else {
+	    CKYBuffer unpadInput;
+	    CKYBuffer_InitEmpty(&unpadInput);
+            stripRSAPadding(&unpadInput, input); /* will throw exception 
+						  * on error */
+	    status = P15Applet_SignDecrypt(conn, key->getKeyRef(), keySize/8,
+				direction, &unpadInput, output, &result);
+            CKYBuffer_FreeData(&unpadInput);
+	    /* if it didn't work, try full padded the input first */
+	    if ((status != CKYSUCCESS) 
+		&& (result != CKYISO_CONDITION_NOT_SATISFIED)
+		&& (result != CKYISO_SECURITY_NOT_SATISFIED))  {
+		status = P15Applet_SignDecrypt(conn, key->getKeyRef(), 
+			keySize/8, direction, input, output, &result);
+	    }
+	    /* finally just lie and try to "decrypt" the buffer */
+	    if ((status != CKYSUCCESS) 
+		&& (result != CKYISO_CONDITION_NOT_SATISFIED) 
+		&& (result != CKYISO_SECURITY_NOT_SATISFIED))  {
+		status = P15Applet_SignDecrypt(conn, key->getKeyRef(),
+			 keySize/8, CKY_DIR_DECRYPT, input, output, &result);
+	    }
+	}
     } else {
         status = CKYApplet_ComputeCrypt(conn, objectToKeyNum(key), 
 		CKY_RSA_NO_PAD, direction, input, NULL, output, 
@@ -4883,8 +5011,7 @@ retry:
             throw PKCS11Exception(CKR_DATA_INVALID);
 	}
 	// version0 keys could be logged out in the middle by someone else,
-	// reauthenticate... This code can go away when we depricate.
-        // version0 applets.
+	// reauthenticate... 
 	if (!isVersion1Key && !loginAttempted  && 
 				userPinCache(key->getUser())->isValid() &&
 					(result == CKYISO_UNAUTHORIZED)) {
