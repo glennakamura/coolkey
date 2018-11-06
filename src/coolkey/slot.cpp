@@ -279,24 +279,22 @@ SlotList::updateReaderList()
      * don't recognize.
      */
 
-    /* first though, let's check to see if any previously removed readers have 
-     * come back from the dead. If the ignored bit has been set, we do not need
-     * it any more.
-    */
+    /* Iterate through all the readers to see if we need to make unavailable any
+     * freshly removed readers. Also, see if any previously removed
+     * readers have come back from the dead and don't need to be ignored.
+     */
 
     const char *curReaderName = NULL;
     unsigned long knownState = 0;
     for(int ri = 0 ; ri < numReaders; ri ++)  {
-       
         knownState = CKYReader_GetKnownState(&readerStates[ri]);
-        if( !(knownState & SCARD_STATE_IGNORE))  {
-            continue;
-        }
- 
+
         curReaderName =  CKYReader_GetReaderName(&readerStates[ri]); 
         if(readerNameExistsInList(curReaderName,&readerNames)) {
             CKYReader_SetKnownState(&readerStates[ri], knownState & ~SCARD_STATE_IGNORE); 
-                 
+        } else {
+            if (!(knownState & SCARD_STATE_UNAVAILABLE))
+                CKYReader_SetKnownState(&readerStates[ri], knownState | SCARD_STATE_UNAVAILABLE | SCARD_STATE_CHANGED);
         }
     } 
 
@@ -1236,6 +1234,32 @@ SlotList::waitForSlotEvent(CK_FLAGS flag, CK_SLOT_ID_PTR slotp, CK_VOID_PTR res)
 		delete [] myReaderStates;
 	    }
 	    throw;
+	}
+
+	/* Before round-tripping to the daemon for the duration of the
+	 * timeout, first see if we lost any readers, and pick a slot
+	 * from that set to return
+	 */
+	for (i=0; i < numReaders; i++) {
+	    unsigned long knownState = CKYReader_GetKnownState(&readerStates[i]);
+
+	    if ((knownState & SCARD_STATE_UNAVAILABLE) &&
+		(knownState & SCARD_STATE_CHANGED)) {
+		CKYReader_SetKnownState(&readerStates[i], knownState & ~SCARD_STATE_CHANGED);
+		readerListLock.releaseLock();
+		*slotp = slotIndexToID(i);
+		found = TRUE;
+		break;
+	    }
+	}
+
+	if (found) {
+	    break;
+	}
+
+	if (shuttingDown) {
+	    readerListLock.releaseLock();
+	    break;
 	}
 
 	if (myNumReaders != numReaders) {
