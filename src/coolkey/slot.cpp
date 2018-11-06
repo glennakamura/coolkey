@@ -415,8 +415,9 @@ Slot::Slot(const char *readerName_, Log *log_, CKYCardContext* context_)
 	slotInfoFound(false), context(context_), conn(NULL), state(UNKNOWN), 
 	isVersion1Key(false), needLogin(false), fullTokenName(false), 
 	mCoolkey(false), mOldCAC(false), mCACLocalLogin(false),
-	pivContainer(-1), pivKey(-1), mECC(false), p15aid(0), p15odfAddr(0),
-	p15tokenInfoAddr(0), p15Instance(0),
+	pivContainer(-1), pivKey(-1), maxCacCerts(MAX_CERT_SLOTS), 
+	algs(ALG_NONE), p15aid(0), p15odfAddr(0), p15tokenInfoAddr(0),
+	p15Instance(0),
 #ifdef USE_SHMEM
 	shmem(readerName_),
 #endif
@@ -776,6 +777,7 @@ Slot::connectToToken()
 	 state |= PIV_CARD | APPLET_SELECTABLE | APPLET_PERSONALIZED;
 	 isVersion1Key = 0;
 	 needLogin = true;
+	 maxCacCerts = MAX_CERT_SLOTS;
          mCoolkey = 0;
 	 mOldCAC = 0;
 	 mCACLocalLogin = getPIVLoginType();
@@ -927,8 +929,12 @@ Slot::getCACAid()
 	}
 	/* yes, fill in the old applets */
 	mOldCAC = true;
+	maxCacCerts = 1;
 	for (i=1; i< MAX_CERT_SLOTS; i++) {
-	    CACApplet_SelectPKI(conn, &cardAID[i], i, NULL);
+	    status = CACApplet_SelectPKI(conn, &cardAID[i], i, NULL);
+	    if (status == CKYSUCCESS) {
+		maxCacCerts = i+1;
+	    }
 	}
 	return CKYSUCCESS;
     }
@@ -986,6 +992,7 @@ Slot::getCACAid()
     if (certSlot == 0) {
 	status = CKYAPDUFAIL; /* probably neeed a beter error code */
     }
+    maxCacCerts = certSlot;
 
 done:
     CKYBuffer_FreeData(&tBuf);
@@ -2168,12 +2175,11 @@ Slot::addKeyObject(list<PKCS11Object>& objectList, const ListObjectInfo& info,
         }
         keyObj.completeKey(*iter);
 
-        /* For now this is how we determine what type of key.
-           Also for now, allow only one or the other */
+        /*  use key object to determine what algorithms we support */
         if ( keyObj.getKeyType() == PKCS11Object::ecc) {
-            mECC = true;
+            algs = (SlotAlgs) (algs | ALG_ECC);
         } else {
-            mECC = false;
+            algs = (SlotAlgs) (algs | ALG_RSA);
         }
        
     }
@@ -2205,7 +2211,7 @@ Slot::addCertObject(list<PKCS11Object>& objectList,
 void
 Slot::unloadObjects()
 {
-    mECC = false;
+    algs = ALG_NONE;
     tokenObjects.clear();
     free(personName);
     personName = NULL;
@@ -2269,29 +2275,42 @@ Slot::unloadObjects()
 // Shared memory segments are fixed size (equal to the object memory size of
 // the token). 
 //
+//
+//
+
+struct SlotDataPair {
+    unsigned long dataOffset;
+    unsigned long  dataSize;
+};
 
 struct SlotSegmentHeader {
     unsigned short version;
     unsigned short headerSize;
     unsigned char  valid;
-    unsigned char  reserved;
+    unsigned char  firstCacCert;
     unsigned char  cuid[10];
-    unsigned short reserved2;
+
+    unsigned short reserved; 
     unsigned short dataVersion;
     unsigned short dataHeaderOffset;
     unsigned short dataOffset;
     unsigned long  dataHeaderSize;
     unsigned long  dataSize;
-    unsigned long  cert2Offset;
-    unsigned long  cert2Size;
+    unsigned long  nextDataOffset;
+    SlotDataPair cacCerts[MAX_CERT_SLOTS];
 };
+
+const unsigned char NOT_A_CAC=0xff; /* place in firstCacCert field */
+const unsigned short CAC_DATA_VERSION=2;
+
 
 #define MAX_OBJECT_STORE_SIZE 15000
 //
 // previous development versions used a segment prefix of
 // "coolkeypk11s"
 //
-#define SEGMENT_PREFIX "coolkeypk11s"
+#define SEGMENT_PREFIX "coolkeypk11t" // update segment since the old cache was
+                                      // incompatible
 #define CAC_FAKE_CUID "CAC Certs"
 SlotMemSegment::SlotMemSegment(const char *readerName): 
 	segmentAddr(NULL),  segmentSize(0), segment(NULL)
@@ -2320,9 +2339,8 @@ SlotMemSegment::SlotMemSegment(const char *readerName):
 	return;
     }
 
-    SlotSegmentHeader *segmentHeader = (SlotSegmentHeader *)segmentAddr;
     if (needInit) {
-	segmentHeader->valid = 0;
+	clearValid(0);
     }
     segmentSize = segment->getSHMemSize();
 }
@@ -2396,6 +2414,18 @@ SlotMemSegment::getDataVersion() const
     return segmentHeader->dataVersion;
 }
 
+unsigned char
+SlotMemSegment::getFirstCacCert() const
+{
+    if (!segment) {
+	return NOT_A_CAC;
+    }
+
+    SlotSegmentHeader *segmentHeader = (SlotSegmentHeader *)segmentAddr;
+
+    return segmentHeader->firstCacCert;
+}
+
 void
 SlotMemSegment::setVersion(unsigned short version)
 {
@@ -2417,6 +2447,18 @@ SlotMemSegment::setDataVersion(unsigned short version)
 
     SlotSegmentHeader *segmentHeader = (SlotSegmentHeader *)segmentAddr;
     segmentHeader->dataVersion = version;
+}
+
+void
+SlotMemSegment::setFirstCacCert(unsigned char firstCacCert)
+{
+    if (!segment) {
+	return;
+    }
+
+    SlotSegmentHeader *segmentHeader = (SlotSegmentHeader *)segmentAddr;
+
+    segmentHeader->firstCacCert = firstCacCert;
 }
 
 bool
@@ -2493,23 +2535,13 @@ SlotMemSegment::readCACCert(CKYBuffer *objData, CKYByte instance) const
     int size;
     CKYByte *data;
 
-    switch (instance) {
-    case 0:
-	data  = (CKYByte *) &segmentAddr[segmentHeader->dataHeaderOffset];
-	size = segmentHeader->dataHeaderSize;
-	break;
-    case 1:
-	data  = (CKYByte *) &segmentAddr[segmentHeader->dataOffset];
-	size = segmentHeader->dataSize;
-	break;
-    case 2:
-	data  = (CKYByte *) &segmentAddr[segmentHeader->cert2Offset];
-	size = segmentHeader->cert2Size;
-	break;
-    default:
+    if (instance >= MAX_CERT_SLOTS) {
 	CKYBuffer_Resize(objData, 0);
 	return;
     }
+    data = (CKYByte *) &segmentAddr[segmentHeader->cacCerts[instance]
+								.dataOffset];
+    size = segmentHeader->cacCerts[instance].dataSize;
     CKYBuffer_Replace(objData, 0, data, size);
 }
 
@@ -2523,30 +2555,20 @@ SlotMemSegment::writeCACCert(const CKYBuffer *data, CKYByte instance)
     SlotSegmentHeader *segmentHeader = (SlotSegmentHeader *)segmentAddr;
     int size = CKYBuffer_Size(data);
     CKYByte *shmData;
-    switch (instance) {
-    case 0:
-	segmentHeader->headerSize = sizeof *segmentHeader;
-	segmentHeader->dataHeaderOffset = sizeof *segmentHeader;
-	segmentHeader->dataHeaderSize = size;
-	segmentHeader->dataOffset = segmentHeader->dataHeaderOffset + size;
-	segmentHeader->dataSize = 0;
-	segmentHeader->cert2Offset = segmentHeader->dataOffset;
-	segmentHeader->cert2Size = 0;
-	shmData = (CKYByte *) &segmentAddr[segmentHeader->dataHeaderOffset];
-	break;
-    case 1:
-	segmentHeader->dataSize = size;
-	segmentHeader->cert2Offset = segmentHeader->dataOffset + size;
-	segmentHeader->cert2Size = 0;
-	shmData = (CKYByte *) &segmentAddr[segmentHeader->dataOffset];
-	break;
-    case 2:
-	segmentHeader->cert2Size = size;
-	shmData = (CKYByte *) &segmentAddr[segmentHeader->cert2Offset];
-	break;
-    default:
+
+    if (instance >= MAX_CERT_SLOTS) {
 	return;
     }
+
+    if (segmentHeader->firstCacCert == NOT_A_CAC) {
+	segmentHeader->firstCacCert = instance;
+    }
+    unsigned long dataOffset = segmentHeader->nextDataOffset;
+    segmentHeader->cacCerts[instance].dataOffset = dataOffset;
+    segmentHeader->nextDataOffset += size;
+    segmentHeader->cacCerts[instance].dataSize = size;
+    shmData = (CKYByte *) &segmentAddr[dataOffset];
+
     memcpy(shmData, CKYBuffer_Data(data), size);
 }
 
@@ -2558,15 +2580,18 @@ SlotMemSegment::clearValid(CKYByte instance)
 	return;
     }
     SlotSegmentHeader *segmentHeader = (SlotSegmentHeader *)segmentAddr;
-    switch (instance) {
-    case 0:
-	segmentHeader->headerSize = 0;
-	segmentHeader->dataHeaderSize = 0;
-	/* fall through */
-    case 1:
-	segmentHeader->dataSize = 0;
+
+    segmentHeader->headerSize = sizeof *segmentHeader;
+    segmentHeader->dataHeaderOffset = sizeof *segmentHeader;
+    segmentHeader->dataHeaderSize = 0;
+    segmentHeader->dataSize = 0;
+    for (int i=0; i < MAX_CERT_SLOTS; i++) {
+	segmentHeader->cacCerts[i].dataSize = 0;
     }
+    segmentHeader->dataOffset = sizeof *segmentHeader;
+    segmentHeader->nextDataOffset = sizeof *segmentHeader;
     segmentHeader->valid = 0;
+    segmentHeader->firstCacCert = NOT_A_CAC;
 }
 
 void
@@ -2882,8 +2907,7 @@ berProcess(CKYBuffer *buf, int matchTag, CKYBuffer *target, BERop type)
 
 
 CKYStatus
-Slot::readCACCertificateFirst(CKYBuffer *cert, CKYSize *nextSize, 
-			      bool throwException)
+Slot::readCACCertificateFirst(CKYBuffer *cert, CKYSize *nextSize)
 {
     CKYStatus status;
     CKYISOStatus apduRC;
@@ -2897,9 +2921,6 @@ Slot::readCACCertificateFirst(CKYBuffer *cert, CKYSize *nextSize,
 	CKYBuffer_InitEmpty(&certInfo);
 	CKYBuffer_Resize(cert, 0);
 	status = PIVApplet_GetCertificate(conn, cert, pivContainer, &apduRC);
-	if (throwException && (status != CKYSUCCESS)) {
-	    handleConnectionError();
-	}
 	/* actually, on success, we need to parse the certificate and find the
 	 * propper tag */
 	if (status == CKYSUCCESS) {
@@ -2940,10 +2961,10 @@ Slot::readCACCertificateFirst(CKYBuffer *cert, CKYSize *nextSize,
     if (mOldCAC) {
 	/* get the first 100 bytes of the cert */
 	status = CACApplet_GetCertificateFirst(conn, cert, nextSize, &apduRC);
-	if (throwException && (status != CKYSUCCESS)) {
-	    handleConnectionError();
+	if (status == CKYSUCCESS) {
+	    return status;
 	}
-	return status;
+	/* try to use CACApplet_ReadFile before we give up */
     }
 
     CKYBuffer tBuf;
@@ -2959,11 +2980,11 @@ Slot::readCACCertificateFirst(CKYBuffer *cert, CKYSize *nextSize,
 
     /* handle the new CAC card read */
     /* read the TLV */
-    status = CACApplet_ReadFile(conn, CAC_TAG_FILE, &tBuf, NULL);
+    status = CACApplet_ReadFile(conn, CAC_TAG_FILE, &tBuf, &apduRC);
     if (status != CKYSUCCESS) {
 	goto done;
     }
-    status = CACApplet_ReadFile(conn, CAC_VALUE_FILE, &vBuf, NULL);
+    status = CACApplet_ReadFile(conn, CAC_VALUE_FILE, &vBuf, &apduRC);
     if (status != CKYSUCCESS) {
 	goto done;
     }
@@ -3199,14 +3220,12 @@ Slot::loadCACCert(CKYByte instance)
     CKYStatus status = CKYSUCCESS;
     CKYBuffer cert;
     CKYBuffer rawCert;
-    CKYBuffer shmCert;
     CKYSize  nextSize;
 
     OSTime time = OSTimeNow();
 
     CKYBuffer_InitEmpty(&cert);
     CKYBuffer_InitEmpty(&rawCert);
-    CKYBuffer_InitEmpty(&shmCert);
 
     //
     // not all CAC cards have all the PKI instances
@@ -3215,78 +3234,24 @@ Slot::loadCACCert(CKYByte instance)
     try {
         selectCACApplet(instance, false);
     } catch(PKCS11Exception& e) {
-	// all CAC's must have instance '0', throw the error it
-	// they don't.
-	if (instance == 0) throw e;
-	// If the CAC doesn't have instance '2', and we were updating
-	// the shared memory, set it to valid now.
-	if ((instance == 2) && !shmem.isValid()) {
-	    shmem.setValid();
-	}
 	return;
     }
 
     log->log("CAC Cert %d: select CAC applet:  %d ms\n",
 						 instance, OSTimeNow() - time);
 
-    if (instance == 0) {
-	readCACCertificateFirst(&rawCert, &nextSize, true);
-
-        if(CKYBuffer_Size(&rawCert) <= 1) {
-             handleConnectionError();
-        }
-	log->log("CAC Cert %d: fetch CAC Cert:  %d ms\n", 
-						instance, OSTimeNow() - time);
-    }
-
-    unsigned short dataVersion = 1;
-    CKYBool needRead = 1;
-
     /* see if it matches the shared memory */
-    if (shmem.isValid() &&  shmem.getDataVersion() == dataVersion) {
-	shmem.readCACCert(&shmCert, instance);
-	CKYSize certSize = CKYBuffer_Size(&rawCert);
-	CKYSize shmCertSize = CKYBuffer_Size(&shmCert);
-	const CKYByte *shmData = CKYBuffer_Data(&shmCert);
-
-	if (instance != 0) {
-	    needRead = 0;
-	}
-
-	if (shmCertSize >= certSize) {
-	    if (memcmp(shmData, CKYBuffer_Data(&rawCert), certSize) == 0) {
-		/* yes it does, no need to read the rest of the cert, use
-		 * the cache */
-		CKYBuffer_Replace(&rawCert, 0, shmData, shmCertSize);
-		needRead = 0;
-	    }
-	}
-	if (!needRead && (shmCertSize == 0)) {	
+    if (shmem.isValid() &&  shmem.getDataVersion() == CAC_DATA_VERSION) {
+	shmem.readCACCert(&rawCert, instance);
+	if (CKYBuffer_Size(&rawCert) == 0) {
 	    /* no cert of this type, just return */
 	    return;
 	}
-    }
-    CKYBuffer_FreeData(&shmCert);
-
-    if (needRead) {
-	/* it doesn't, read the new cert and update the cache */
-	if (instance == 0) {
-	    shmem.clearValid(0);
-	    shmem.setVersion(SHMEM_VERSION);
-	    shmem.setDataVersion(dataVersion);
-	} else {
-	    status = readCACCertificateFirst(&rawCert, &nextSize, false);
-	
-	    if ((status != CKYSUCCESS) || (CKYBuffer_Size(&rawCert) <= 1)) {
-		/* CAC only requires the Certificate in pki '0' */
-		/* if pki '1' or '2' are empty, treat it as a non-fatal error*/
-		if (instance == 2) {
-		    /* we've attempted to read all the certs, shared memory
-		     * is now valid */
-		    shmem.setValid();
-		}
-		return;
-	    }
+    } else {
+	status = readCACCertificateFirst(&rawCert, &nextSize);
+	if ((status != CKYSUCCESS) || (CKYBuffer_Size(&rawCert) <= 1)) {
+	    /*this cert doesn't exist, go to the next one */
+	    return;
 	}
 
 	if (nextSize) {
@@ -3298,9 +3263,6 @@ Slot::loadCACCert(CKYByte instance)
 	    handleConnectionError();
 	}
 	shmem.writeCACCert(&rawCert, instance);
-	if (instance == 2) {
-	    shmem.setValid();
-	}
     }
 
 
@@ -3368,14 +3330,17 @@ Slot::loadCACCert(CKYByte instance)
     log->log("CAC Cert %d: Cert has been uncompressed:  %d ms\n",
 						instance, OSTimeNow() - time);
 
-    CACCert certObj(instance, &cert);
-    CACPrivKey privKey(instance, certObj);
-    CACPubKey pubKey(instance, certObj);
+    bool isPIV = (bool)((state & PIV_CARD) == PIV_CARD);
+    CACCert certObj(instance, &cert, isPIV);
+    CACPrivKey privKey(instance, certObj, isPIV);
+    CACPubKey pubKey(instance, certObj, isPIV);
     tokenObjects.push_back(privKey);
     tokenObjects.push_back(pubKey);
     tokenObjects.push_back(certObj);
     if ( pubKey.getKeyType() == PKCS11Object::ecc) {
-	mECC = 1;
+        algs = (SlotAlgs) (algs | ALG_ECC);
+    } else {
+        algs = (SlotAlgs) (algs | ALG_RSA);
     }
 
     if (personName == NULL) {
@@ -3385,6 +3350,94 @@ Slot::loadCACCert(CKYByte instance)
             fullTokenName = true;
 	}
     }
+}
+
+void
+Slot::initCACShMem(void)
+{
+    bool failed = false;
+
+    unsigned char firstCert = shmem.getFirstCacCert();
+
+    log->log("init CACShMem: \n");
+    /* check to make sure the shared memory is initialized with a CAC card */
+    if (shmem.isValid() && shmem.getDataVersion() ==  CAC_DATA_VERSION
+				&& firstCert != NOT_A_CAC) {
+	CKYBuffer rawCert;
+	CKYBuffer shmCert;
+	CKYSize  nextSize;
+
+        log->log("init CACShMem: valid CAC cache found firstCert = %d\n",
+						 firstCert);
+	CKYBuffer_InitEmpty(&rawCert);
+	CKYBuffer_InitEmpty(&shmCert);
+
+
+	/* yes, see if it's this cac card by comparing the first cert 
+	 * in the chain */
+
+	/* see if the first cert is in the expected slot */
+	try {
+	    selectCACApplet(firstCert, false);
+ 	} catch(PKCS11Exception& e) {
+	    failed = true;
+            log->log("init CACShMem: applet select failed firstCert = %d\n",
+							firstCert);
+	}
+	if (!failed) {
+	    CKYStatus status = readCACCertificateFirst(&rawCert, &nextSize);
+	    if ((status != CKYSUCCESS) || CKYBuffer_Size(&rawCert) <= 1) {
+		failed = true;
+                log->log("init CACShMem: read Cert failed firstCert = %d\n",
+			 				firstCert);
+	    }
+	}
+	if (!failed) {
+	    shmem.readCACCert(&shmCert, firstCert);
+	    CKYSize certSize = CKYBuffer_Size(&rawCert);
+	    CKYSize shmCertSize = CKYBuffer_Size(&shmCert);
+	    const CKYByte *shmData = CKYBuffer_Data(&shmCert);
+
+	    if (shmCertSize >= certSize) {
+		if (memcmp(shmData, CKYBuffer_Data(&rawCert), certSize) == 0) {
+		    /* this card is cached, go on and use the cache */
+            	    log->log("init CACShMem: entries match, using cache\n");
+		    CKYBuffer_FreeData(&rawCert);
+		    CKYBuffer_FreeData(&shmCert);
+		    return;
+		}
+            }		
+            log->log("init CACShMem: no entry match certSize=%d"
+				" shmCertSize=%d\n",certSize, shmCertSize);
+	}
+	CKYBuffer_FreeData(&rawCert);
+	CKYBuffer_FreeData(&shmCert);
+    }
+
+    log->log("init CACShMem: starting new cache valid=%d version=%d "
+		" firstCert=%d\n",shmem.isValid(), shmem.getDataVersion(), 
+				firstCert);
+    /* cache is either invalid or for another card, start initializing it */
+    shmem.clearValid(0);
+    shmem.setVersion(SHMEM_VERSION);
+    shmem.setDataVersion(CAC_DATA_VERSION);
+}
+
+void
+Slot::verifyCACShMem(void)
+{
+    /* if the memory is valid, then nothing to do */
+    if (shmem.isValid()) {
+	return;
+    }
+    /* if we didn't find any cert fail */
+    if (shmem.getFirstCacCert() == NOT_A_CAC) {
+	shmem.clearValid(0);
+	disconnect();
+        throw PKCS11Exception(CKR_DEVICE_REMOVED);
+    }
+    /* we're all set, let others see our results */
+    shmem.setValid(); 
 }
 
 void
@@ -3406,9 +3459,11 @@ Slot::loadObjects()
     std::list<ListObjectInfo>::iterator iter;
 
     if (state & GOV_CARD) {
-	loadCACCert(0);
-	loadCACCert(1);
-	loadCACCert(2);
+	initCACShMem();
+	for (int i=0; i < maxCacCerts; i++) {
+	   loadCACCert(i);
+	}
+	verifyCACShMem();
 	status = trans.end();
 	loadReaderObject();
 	return;
@@ -4720,10 +4775,6 @@ Slot::performECCSignature(CKYBuffer *output, const CKYBuffer *input,
     CKYStatus status = trans.begin(conn);
     if( status != CKYSUCCESS ) handleConnectionError();
 
-    if (!mECC) {
-        throw PKCS11Exception(CKR_FUNCTION_NOT_SUPPORTED);
-    }
-
     CKYISOStatus result;
     bool loginAttempted = false;
 
@@ -4790,9 +4841,6 @@ Slot::performRSAOp(CKYBuffer *output, const CKYBuffer *input,
 		unsigned int keySize, const PKCS11Object *key, 
 		CKYByte direction)
 {
-    if ( mECC ) {
-        throw PKCS11Exception(CKR_FUNCTION_NOT_SUPPORTED);
-    }
 
     //
     // establish a transaction
@@ -5145,10 +5193,6 @@ Slot::performECCKeyAgreement(CK_MECHANISM_TYPE deriveMech,
 	CKYBuffer *publicDataBuffer, CKYBuffer *secretKeyBuffer, 
 	const PKCS11Object *key, unsigned int keySize)
 {
-    if (!mECC) {
-       throw PKCS11Exception(CKR_FUNCTION_NOT_SUPPORTED);
-    }
-
     Transaction trans;
     CKYStatus status = trans.begin(conn);
     if( status != CKYSUCCESS ) handleConnectionError();

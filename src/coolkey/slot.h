@@ -79,9 +79,11 @@ public:
     bool CUIDIsEqual(const CKYBuffer *cuid) const;
     unsigned short getVersion() const;
     unsigned short getDataVersion() const;
+    unsigned char  getFirstCacCert() const;
     void setCUID(const CKYBuffer *cuid);
     void setVersion(unsigned short version);
     void setDataVersion(unsigned short version);
+    void setFirstCacCert(unsigned char firstCacCert);
     bool isValid() const;
     int size() const;
     const unsigned char *getCUID() const;
@@ -90,6 +92,7 @@ public:
     void setSize(int size);
     void readData(CKYBuffer *data) const;
     void writeData(const CKYBuffer *data);
+    void initCACHeaders(void);
     void readCACCert(CKYBuffer *data, CKYByte instance) const;
     void writeCACCert(const CKYBuffer *data, CKYByte instance);
     void clearValid(CKYByte instance);
@@ -294,7 +297,13 @@ class CryptParams {
 				 const CKYBuffer *paddedOutput) const = 0;
 };
 
-#define MAX_CERT_SLOTS 3
+#define MAX_CERT_SLOTS 10
+typedef enum {
+	ALG_NONE= 0x0,
+	ALG_ECC = 0x1,
+	ALG_RSA = 0x2
+} SlotAlgs;
+
 #define MAX_AUTH_USERS 3
 class Slot {
 
@@ -349,7 +358,8 @@ class Slot {
     bool mCACLocalLogin;
     int pivContainer;
     int pivKey;
-    bool mECC;
+    int maxCacCerts;
+    SlotAlgs algs;
     unsigned short p15aid;
     unsigned short p15odfAddr;
     unsigned short p15tokenInfoAddr;
@@ -424,8 +434,7 @@ class Slot {
     list<ListObjectInfo> fetchSeparateObjects();
 
     CKYStatus getCACAid();
-    CKYStatus readCACCertificateFirst(CKYBuffer *cert, CKYSize *nextSize,
-                              bool throwException);
+    CKYStatus readCACCertificateFirst(CKYBuffer *cert, CKYSize *nextSize);
     CKYStatus readCACCertificateAppend(CKYBuffer *cert, CKYSize nextSize);
 
     CKYStatus getP15Params();
@@ -485,6 +494,8 @@ class Slot {
     void processComputeCrypt(CKYBuffer *result, const CKYAPDU *apdu);
 
     CKYByte objectToKeyNum(const PKCS11Object *key);
+    void initCACShMem(void);
+    void verifyCACShMem(void);
     Slot(const Slot &cpy)
 #ifdef USE_SHMEM
 	: shmem(readerName)
@@ -580,7 +591,7 @@ class Slot {
        CK_OBJECT_HANDLE hBaseKey, CK_ATTRIBUTE_PTR pTemplate, 
        CK_ULONG ulAttributeCount, CK_OBJECT_HANDLE_PTR phKey, CryptParams& params);
 
-    bool getIsECC() { return mECC; }
+    SlotAlgs getAlgs() { return algs; }
 };
 
 class SlotList {

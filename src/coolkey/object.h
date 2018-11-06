@@ -219,17 +219,17 @@ class Cert : public PKCS11Object {
 
 class CACPrivKey : public PKCS11Object {
   public:
-    CACPrivKey(CKYByte instance, const PKCS11Object &cert);
+    CACPrivKey(CKYByte instance, const PKCS11Object &cert, bool isPIV);
 };
 
 class CACPubKey : public PKCS11Object {
   public:
-    CACPubKey(CKYByte instance, const PKCS11Object &cert);
+    CACPubKey(CKYByte instance, const PKCS11Object &cert, bool isPIV);
 };
 
 class CACCert : public PKCS11Object {
   public:
-    CACCert(CKYByte instance, const CKYBuffer *derCert);
+    CACCert(CKYByte instance, const CKYBuffer *derCert, bool isPIV);
 };
 
 typedef enum { PK15StateInit, PK15StateNeedObject, 

@@ -80,9 +80,16 @@ ecMechanismList[] = {
     {CKM_ECDSA,{256,521,CKF_HW | CKF_SIGN | CKF_EC_F_P}},
     {CKM_ECDH1_DERIVE,{256, 521, CKF_HW | CKF_DERIVE | CKF_EC_F_P} }
 };
+static const MechInfo
+allMechanismList[] = {
+    {CKM_RSA_PKCS, { 1024, 4096, CKF_HW | CKF_SIGN | CKF_DECRYPT } },
+    {CKM_ECDSA,{256,521,CKF_HW | CKF_SIGN | CKF_EC_F_P}},
+    {CKM_ECDH1_DERIVE,{256, 521, CKF_HW | CKF_DERIVE | CKF_EC_F_P} }
+};
 
 unsigned int numRSAMechanisms = sizeof(rsaMechanismList)/sizeof(MechInfo);
 unsigned int numECMechanisms = sizeof(ecMechanismList)/sizeof(MechInfo);
+unsigned int numAllMechanisms = sizeof(allMechanismList)/sizeof(MechInfo);
 
 /* ------------------------------------------------------------ */
 
@@ -382,13 +389,22 @@ C_GetMechanismList(CK_SLOT_ID slotID, CK_MECHANISM_TYPE_PTR pMechanismList,
             return CKR_TOKEN_NOT_PRESENT;
         }
 
-        if ( slot->getIsECC()) {
+	switch (slot->getAlgs()) {
+	case ALG_ECC|ALG_RSA:
+            mechanismList = allMechanismList;
+            numMechanisms = numAllMechanisms;
+	    break;
+	case ALG_ECC:
             mechanismList = ecMechanismList;
             numMechanisms = numECMechanisms;
-        } else {
+	    break;
+	case ALG_NONE:
+	case ALG_RSA:
+	default:
             mechanismList = rsaMechanismList;
             numMechanisms = numRSAMechanisms;
-        }
+	    break;
+	}
   
         if( pMechanismList != NULL ) {
             if( *pulCount < numMechanisms ) {
@@ -438,13 +454,22 @@ C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type,
             return CKR_TOKEN_NOT_PRESENT;
         }
 
-        if ( slot->getIsECC()) {
+	switch (slot->getAlgs()) {
+	case ALG_ECC|ALG_RSA:
+            mechanismList = allMechanismList;
+            numMechanisms = numAllMechanisms;
+	    break;
+	case ALG_ECC:
             mechanismList = ecMechanismList;
             numMechanisms = numECMechanisms;
-        } else {
+	    break;
+	case ALG_NONE:
+	case ALG_RSA:
+	default:
             mechanismList = rsaMechanismList;
             numMechanisms = numRSAMechanisms;
-        }
+	    break;
+	}
 
         for(unsigned int i=0; i < numMechanisms; ++i ) {
             if( mechanismList[i].mech == type ) {

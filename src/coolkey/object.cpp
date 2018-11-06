@@ -1232,7 +1232,7 @@ Reader::Reader(unsigned long muscleObjID, CK_OBJECT_HANDLE handle,
 }
 
 
-CACPrivKey::CACPrivKey(CKYByte instance, const PKCS11Object &cert) : 
+CACPrivKey::CACPrivKey(CKYByte instance, const PKCS11Object &cert,bool isPIV) : 
         PKCS11Object( ((int)'k') << 24 | ((int)instance+'0') << 16,
                          instance | 0x400)
 {
@@ -1242,7 +1242,9 @@ CACPrivKey::CACPrivKey(CKYByte instance, const PKCS11Object &cert) :
 
     /* So we know what the key is supposed to be used for based on
      * the instance */
-    if (instance == 2) {
+    /* instance 2 is usually a decryption cert. >2 are usually old decryption 
+     * certs */
+    if (instance == 2 || (instance > (isPIV ? 3 : 2))) {
         decrypt = TRUE;
     }
 
@@ -1305,8 +1307,8 @@ CACPrivKey::CACPrivKey(CKYByte instance, const PKCS11Object &cert) :
      CKYBuffer_FreeData(&param2);
 }
 
-CACPubKey::CACPubKey(CKYByte instance, const PKCS11Object &cert) : 
-        PKCS11Object( ((int)'k') << 24 | ((int)(instance+'5')) << 16,
+CACPubKey::CACPubKey(CKYByte instance, const PKCS11Object &cert, bool isPIV) : 
+        PKCS11Object( ((int)'k') << 24 | ((int)(instance+'a')) << 16,
                        instance | 0x500)
 {
     CKYBuffer id;
@@ -1315,7 +1317,7 @@ CACPubKey::CACPubKey(CKYByte instance, const PKCS11Object &cert) :
 
     /* So we know what the key is supposed to be used for based on
      * the instance */
-    if (instance == 2) {
+    if (instance == 2 || (instance > (isPIV ? 3 : 2))) {
         encrypt = TRUE;
     }
 
@@ -1359,6 +1361,9 @@ CACPubKey::CACPubKey(CKYByte instance, const PKCS11Object &cert) :
             setAttribute(CKA_EC_POINT, &param1);
             setAttribute(CKA_EC_PARAMS, &param2);
 	    setAttributeULong(CKA_KEY_TYPE, CKK_EC);
+    	    setAttributeBool(CKA_VERIFY_RECOVER, FALSE);
+    	    setAttributeBool(CKA_ENCRYPT, FALSE);
+    	    setAttributeBool(CKA_DERIVE, encrypt);
             break;
         default:
             break;
@@ -1376,6 +1381,26 @@ static const char *CAC_Label[] = {
         "CAC ID Certificate",
         "CAC Email Signature Certificate",
         "CAC Email Encryption Certificate",
+        "CAC Cert 3",
+        "CAC Cert 4",
+        "CAC Cert 5",
+        "CAC Cert 6",
+        "CAC Cert 7",
+        "CAC Cert 8",
+        "CAC Cert 9",
+};
+
+static const char *PIV_Label[] = {
+        "PIV ID Certificate",
+        "PIV Email Signature Certificate",
+        "PIV Email Encryption Certificate",
+        "PIV Card Authentication Certificate",
+        "PIV Cert 4",
+        "PIV Cert 5",
+        "PIV Cert 6",
+        "PIV Cert 7",
+        "PIV Cert 8",
+        "PIV Cert 9",
 };
 
 static const unsigned char CN_DATA[] = { 0x55, 0x4, 0x3 };
@@ -1454,7 +1479,7 @@ GetUserName(const CKYBuffer *dn)
     return string;
 }
 
-CACCert::CACCert(CKYByte instance, const CKYBuffer *derCert) : 
+CACCert::CACCert(CKYByte instance, const CKYBuffer *derCert, bool isPIV) : 
         PKCS11Object( ((int)'c') << 24 | ((int)instance+'0') << 16, 
                         instance | 0x600)
 {
@@ -1471,7 +1496,7 @@ CACCert::CACCert(CKYByte instance, const CKYBuffer *derCert) :
     setAttribute(CKA_ID, &id);
     CKYBuffer_FreeData(&id);
     setAttributeULong(CKA_CERTIFICATE_TYPE, CKC_X_509);
-    setAttribute(CKA_LABEL, CAC_Label[instance]);
+    setAttribute(CKA_LABEL, isPIV ? PIV_Label[instance] : CAC_Label[instance]);
 
     CKYBuffer derSerial; CKYBuffer_InitEmpty(&derSerial);
     CKYBuffer derSubject; CKYBuffer_InitEmpty(&derSubject);
