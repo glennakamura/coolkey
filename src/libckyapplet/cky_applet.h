@@ -71,6 +71,15 @@ typedef unsigned short CKYISOStatus; /* applet return status */
 #define CKYISO_INTERNAL_ERROR        0x9cff  /* Reserved for debugging, 
 					     * shouldn't happen */
 
+#define CAC_INVALID_PARAMS	    0x6a83
+#define CAC_TAG_FILE			1
+#define CAC_VALUE_FILE			2
+
+
+#define CAC_TAG_CARDURL			0xf3
+#define CAC_TAG_CERTIFICATE		0x70
+#define CAC_TLV_APP_PKI			0x04
+
 /*
  * Pin Constants as used by our applet
  */
@@ -208,6 +217,12 @@ typedef struct _CKYAppletArgComputeCrypt {
     const CKYBuffer *data;
     const CKYBuffer *sig;
 } CKYAppletArgComputeCrypt;
+
+typedef struct _CACAppletArgReadFile {
+    CKYByte   type;
+    CKYByte   count;
+    unsigned short offset;
+} CACAppletArgReadFile;
 
 /* fills in an APDU from a structure -- form of all the generic factories*/
 typedef CKYStatus (*CKYAppletFactory)(CKYAPDU *apdu, const void *param);
@@ -451,9 +466,17 @@ CKYStatus CKYApplet_DeleteObject(CKYCardConnection *conn, unsigned long objectID
 /* Select the CAC card manager.  Can happen with either applet selected */
 CKYStatus CACApplet_SelectCardManager(CKYCardConnection *conn, 
 							CKYISOStatus *apduRC);
-/* Can happen with either applet selected */
-CKYStatus CACApplet_SelectPKI(CKYCardConnection *conn, CKYByte instance,
-			      CKYISOStatus *apduRC);
+/* Select the CAC CC container. Can happen with either applet selected */
+CKYStatus CACApplet_SelectCCC(CKYCardConnection *conn, CKYISOStatus *apduRC);
+/* Select an old CAC applet and fill in the cardAID */
+CKYStatus CACApplet_SelectPKI(CKYCardConnection *conn, CKYBuffer *cardAid,
+			      CKYByte instance, CKYISOStatus *apduRC);
+/* read a TLV file */
+CKYStatus CACApplet_ReadFile(CKYCardConnection *conn, CKYByte type, 
+			     CKYBuffer *buffer, CKYISOStatus *apduRC);
+CKYStatus CACApplet_SelectFile(CKYCardConnection *conn, unsigned short ef,
+			     CKYISOStatus *apduRC);
+
 /* must happen with PKI applet selected */
 CKYStatus CACApplet_SignDecrypt(CKYCardConnection *conn, const CKYBuffer *data,
 		CKYBuffer *result, CKYISOStatus *apduRC);
