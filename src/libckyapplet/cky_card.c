@@ -445,7 +445,7 @@ ckyCardContext_init(CKYCardContext *ctx)
 static CKYStatus
 ckyCardContext_release(CKYCardContext *ctx)
 {
-    unsigned long rv = ctx->scard->SCardReleaseContext(ctx->context);
+    int32_t rv = ctx->scard->SCardReleaseContext(ctx->context);
     ctx->context = 0;
     if (rv != SCARD_S_SUCCESS) {
 	ctx->lastError = rv;
@@ -457,7 +457,7 @@ ckyCardContext_release(CKYCardContext *ctx)
 static CKYStatus
 ckyCardContext_establish(CKYCardContext *ctx, unsigned long scope)
 {
-    unsigned long rv;
+    int32_t rv;
 
     if (ctx->context) {
 	ckyCardContext_release(ctx);
@@ -528,8 +528,8 @@ CKYCardContext_GetContext(const CKYCardContext *ctx)
 CKYStatus
 CKYCardContext_ListReaders(CKYCardContext *ctx, CKYReaderNameList *readerNames)
 {
-    unsigned long readerLen;
-    unsigned long rv;
+    uint32_t readerLen;
+    int32_t rv;
     char * readerStr = NULL;
     char *cur;
     char ** readerList;
@@ -832,7 +832,7 @@ CKYCardContext_WaitForStatusChange(CKYCardContext *ctx,
     		SCARD_READERSTATE *readers, unsigned long readerCount, 
 							unsigned long timeout)
 {
-    unsigned long rv;
+    int32_t rv;
 
     /* if we aren't established yet, do so now */
     if (!ctx->context) {
@@ -858,7 +858,7 @@ CKYCardContext_WaitForStatusChange(CKYCardContext *ctx,
 CKYStatus 
 CKYCardContext_Cancel(CKYCardContext *ctx)
 {
-    unsigned long rv;
+    int32_t rv;
 
     /* if we aren't established yet, we can't be in change status then */
     if (!ctx->context) {
@@ -894,9 +894,9 @@ struct _CKYCardConnection {
     const CKYCardContext *ctx;
     SCard            *scard;     /* cache a copy from the context */
     SCARDHANDLE      cardHandle;
-    unsigned long    lastError;
+    int32_t          lastError;
     CKYBool           inTransaction;
-    unsigned long    protocol;
+    uint32_t         protocol;
 };
 
 static void
@@ -948,7 +948,7 @@ CKYStatus
 CKYCardConnection_Connect(CKYCardConnection *conn, const char *readerName)
 {
     CKYStatus ret;
-    unsigned long rv;
+    int32_t rv;
 
     ret = CKYCardConnection_Disconnect(conn);
     if (ret != CKYSUCCESS) {
@@ -966,7 +966,7 @@ CKYCardConnection_Connect(CKYCardConnection *conn, const char *readerName)
 CKYStatus 
 CKYCardConnection_Disconnect(CKYCardConnection *conn)
 {
-    unsigned long rv;
+    int32_t rv;
     if (conn->cardHandle == 0) {
 	return CKYSUCCESS;
     }
@@ -994,8 +994,8 @@ CKYCardConnection_GetProtocol(const CKYCardConnection *conn)
 CKYStatus 
 ckyCardConnection_reconnectRaw(CKYCardConnection *conn, unsigned long init)
 {
-    unsigned long rv;
-    unsigned long protocol;
+    int32_t rv;
+    uint32_t protocol;
 
     rv = conn->scard->SCardReconnect(conn->cardHandle,
 	SCARD_SHARE_SHARED, SCARD_PROTOCOL_T0 | SCARD_PROTOCOL_T1 , init, &protocol);
@@ -1021,7 +1021,7 @@ CKYStatus CKYCardConnection_Reset(CKYCardConnection *conn)
 CKYStatus 
 CKYCardConnection_BeginTransaction(CKYCardConnection *conn)
 {
-    unsigned long rv;
+    int32_t rv;
     rv = conn->scard->SCardBeginTransaction(conn->cardHandle);
     if (rv != SCARD_S_SUCCESS) {
 	conn->lastError = rv;
@@ -1034,7 +1034,7 @@ CKYCardConnection_BeginTransaction(CKYCardConnection *conn)
 CKYStatus 
 CKYCardConnection_EndTransaction(CKYCardConnection *conn)
 {
-    unsigned long rv;
+    int32_t rv;
     if (!conn->inTransaction) {
 	return CKYSUCCESS; /* C++ library returns success in this case, but
 		           * it may be better to return an error ? */
@@ -1053,24 +1053,27 @@ CKYCardConnection_TransmitAPDU(CKYCardConnection *conn, CKYAPDU *apdu,
 							CKYBuffer *response)
 {
     CKYStatus ret;
-    unsigned long rv;
+    int32_t rv;
+    uint32_t response_len;
 
     ret = CKYBuffer_Resize(response, CKYAPDU_MAX_LEN);
     if (ret != CKYSUCCESS) {
 	return ret;
     }
 
+    response_len = response->len;
     if( conn->protocol == SCARD_PROTOCOL_T0 ) { 
         rv = conn->scard->SCardTransmit(conn->cardHandle, 
             conn->scard->SCARD_PCI_T0_,
 	    CKYBuffer_Data(&apdu->apduBuf), CKYBuffer_Size(&apdu->apduBuf), 
-	    NULL, response->data, &response->len);
+	    NULL, response->data, &response_len);
     }  else  {
         rv = conn->scard->SCardTransmit(conn->cardHandle,
             conn->scard->SCARD_PCI_T1_,
             CKYBuffer_Data(&apdu->apduBuf), CKYBuffer_Size(&apdu->apduBuf),
-            NULL, response->data, &response->len);
+            NULL, response->data, &response_len);
     } 
+    response->len = response_len;
 
     if (rv != SCARD_S_SUCCESS) {
 	conn->lastError =rv;
@@ -1125,10 +1128,11 @@ CKYStatus
 CKYCardConnection_GetStatus(CKYCardConnection *conn,
 				unsigned long *state, CKYBuffer *ATR)
 {
-    unsigned long readerLen = 0;
-    unsigned long protocol;
-    unsigned long rv;
-    CKYSize atrLen;
+    uint32_t _state = *state;
+    uint32_t readerLen = 0;
+    uint32_t protocol;
+    int32_t rv;
+    uint32_t atrLen;
     char *readerStr;
     CKYStatus ret;
 
@@ -1140,7 +1144,8 @@ CKYCardConnection_GetStatus(CKYCardConnection *conn,
      * care about.
      */
     rv = conn->scard->SCardStatus(conn->cardHandle, 
-	    NULL /*readerName*/, &readerLen, state, &protocol, NULL, &atrLen);
+	    NULL /*readerName*/, &readerLen, &_state, &protocol, NULL, &atrLen);
+    *state = _state;
     if ( rv != SCARD_S_SUCCESS ) {
 	conn->lastError = rv;
         return CKYSCARDERR;
@@ -1167,7 +1172,8 @@ CKYCardConnection_GetStatus(CKYCardConnection *conn,
 	}
 
 	rv = conn->scard->SCardStatus(conn->cardHandle, readerStr, &readerLen,
-                state, &protocol, ATR->data, &atrLen);
+                &_state, &protocol, ATR->data, &atrLen);
+        *state = _state;
 	ATR->len = atrLen;
 	free(readerStr);
     } while (rv == SCARD_E_INSUFFICIENT_BUFFER);
@@ -1184,8 +1190,8 @@ CKYCardConnection_GetAttribute(CKYCardConnection *conn,
 				unsigned long attrID, CKYBuffer *attrBuf)
 {
 #ifdef WIN32
-    unsigned long len = 0;
-    unsigned long rv;
+    uint32_t len = 0;
+    int32_t rv;
     
     /*
      * Get initial length. We have to do all this because the Muscle
@@ -1200,8 +1206,10 @@ CKYCardConnection_GetAttribute(CKYCardConnection *conn,
     }
     CKYBuffer_Resize(attrBuf, len);
 
+    len = attrBuf->len;
     rv = conn->scard->SCardGetAttrib(conn->cardHandle, attrID, 
-						attrBuf->data, &attrBuf->len);
+						attrBuf->data, &len);
+    attrBuf->len = len;
     if( rv != SCARD_S_SUCCESS ) {
 	conn->lastError = rv;
         return CKYSCARDERR;
