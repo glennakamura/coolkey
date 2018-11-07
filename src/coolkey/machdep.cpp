@@ -195,7 +195,7 @@ void OSSleep(int time)
 
 #ifndef BASEPATH
 #ifdef MAC
-#define BASEPATH "/var"
+#define BASEPATH "/tmp"
 #else
 #define BASEPATH "/var/cache"
 #endif
