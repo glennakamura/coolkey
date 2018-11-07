@@ -40,78 +40,78 @@ typedef SCARD_READERSTATE *LPSCARD_READERSTATE;
  * protect against scard API not being installed.
  */
 
-typedef long (WINAPI * SCardEstablishContextFn) (
-    unsigned long dwScope,
+typedef int32_t (WINAPI * SCardEstablishContextFn) (
+    uint32_t dwScope,
     const void * pvReserved1,
     const void * pvReserved2,
     LPSCARDCONTEXT phContext);
 
-typedef long (WINAPI * SCardReleaseContextFn) (
+typedef int32_t (WINAPI * SCardReleaseContextFn) (
     SCARDCONTEXT hContext);
 
-typedef long (WINAPI * SCardBeginTransactionFn) (
-    long hCard);
+typedef int32_t (WINAPI * SCardBeginTransactionFn) (
+    SCARDHANDLE hCard);
 
-typedef long (WINAPI * SCardEndTransactionFn) (
-    long hCard,
-    unsigned long dwDisposition);
+typedef int32_t (WINAPI * SCardEndTransactionFn) (
+    SCARDHANDLE hCard,
+    uint32_t dwDisposition);
 
-typedef long (WINAPI * SCardConnectFn) (
+typedef int32_t (WINAPI * SCardConnectFn) (
     SCARDCONTEXT hContext,
     const char *szReader,
-    unsigned long dwShareMode,
-    unsigned long dwPreferredProtocols,
-    long *phCard,
-    unsigned long *pdwActiveProtocol);
+    uint32_t dwShareMode,
+    uint32_t dwPreferredProtocols,
+    LPSCARDHANDLE phCard,
+    uint32_t *pdwActiveProtocol);
 
-typedef long (WINAPI * SCardDisconnectFn) (
-    long hCard,
-    unsigned long dwDisposition);
+typedef int32_t (WINAPI * SCardDisconnectFn) (
+    SCARDHANDLE hCard,
+    uint32_t dwDisposition);
 
-typedef long (WINAPI * SCardTransmitFn) (
-    long hCard,
+typedef int32_t (WINAPI * SCardTransmitFn) (
+    SCARDHANDLE hCard,
     LPCSCARD_IO_REQUEST pioSendPci,
     const unsigned char *pbSendBuffer,
-    unsigned long cbSendLength,
+    uint32_t cbSendLength,
     LPSCARD_IO_REQUEST pioRecvPci,
     unsigned char *pbRecvBuffer,
-    unsigned long *pcbRecvLength);
+    uint32_t *pcbRecvLength);
 
-typedef long (WINAPI * SCardReconnectFn) (
-    long hCard,
-    unsigned long dwShareMode,
-    unsigned long dwPreferredProtocols,
-    unsigned long dwInitialization,
-    unsigned long *pdwActiveProtocol);
+typedef int32_t (WINAPI * SCardReconnectFn) (
+    SCARDHANDLE hCard,
+    uint32_t dwShareMode,
+    uint32_t dwPreferredProtocols,
+    uint32_t dwInitialization,
+    uint32_t *pdwActiveProtocol);
 
-typedef long (WINAPI * SCardListReadersFn) (
+typedef int32_t (WINAPI * SCardListReadersFn) (
     SCARDCONTEXT hContext,
     const char *mszGroups,
     char *mszReaders,
-    unsigned long *pcchReaders);
+    uint32_t *pcchReaders);
 
-typedef long (WINAPI * SCardStatusFn) (
-    long hCard,
+typedef int32_t (WINAPI * SCardStatusFn) (
+    SCARDHANDLE hCard,
     char *mszReaderNames,
-    unsigned long *pcchReaderLen,
-    unsigned long *pdwState,
-    unsigned long *pdwProtocol,
+    uint32_t *pcchReaderLen,
+    uint32_t *pdwState,
+    uint32_t *pdwProtocol,
     unsigned char *pbAtr,
-    unsigned long *pcbAtrLen);
+    uint32_t *pcbAtrLen);
 
-typedef long (WINAPI * SCardGetAttribFn) (
-    long hCard,
-    unsigned long dwAttId,
-    char *pbAttr,
-    unsigned long *pchAttrLen);
+typedef int32_t (WINAPI * SCardGetAttribFn) (
+    SCARDHANDLE hCard,
+    uint32_t dwAttId,
+    uint8_t *pbAttr,
+    uint32_t *pchAttrLen);
 
-typedef long (WINAPI * SCardGetStatusChangeFn) (
+typedef int32_t (WINAPI * SCardGetStatusChangeFn) (
     SCARDCONTEXT hContext,
-    unsigned long dwTimeout,
+    uint32_t dwTimeout,
     LPSCARD_READERSTATE rgReaderStates,
-    unsigned long cReaders);
+    uint32_t cReaders);
 
-typedef long (WINAPI * SCardCancelFn) (
+typedef int32_t (WINAPI * SCardCancelFn) (
     SCARDCONTEXT hContext);
 
 typedef struct _SCard {
