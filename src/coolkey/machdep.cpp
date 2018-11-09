@@ -35,6 +35,7 @@
 #include <pthread.h>
 #include <string.h>
 #include <stdlib.h>
+#include <pwd.h>
 #endif
 
 bool OSLock::needThread = 0;
@@ -195,7 +196,7 @@ void OSSleep(int time)
 
 #ifndef BASEPATH
 #ifdef MAC
-#define BASEPATH "/tmp"
+#define BASEPATH "/var"
 #else
 #define BASEPATH "/var/cache"
 #endif
@@ -203,10 +204,10 @@ void OSSleep(int time)
 
 #ifdef FULL_CLEANUP
 #define RESERVED_OFFSET 256
-#define MEMSEGPATH BASEPATH"/coolkey-lock"
+#define MEMSEGPATH "/.coolkey-lock"
 #else 
 #define RESERVED_OFFSET 0
-#define MEMSEGPATH BASEPATH"/coolkey"
+#define MEMSEGPATH "/.coolkey"
 #endif
 
 struct SHMemData {
@@ -325,22 +326,28 @@ SHMem::initSegment(const char *name, int size, bool &init)
 	// from getSHMemAddr.
 	return NULL;
     }
+    const char *homedir;
+    if ((homedir = getenv("HOME")) == NULL) {
+	homedir = getpwuid(getuid())->pw_dir;
+    }
+    size_t homelen = strlen(homedir);
+    /* 1 for the '/', one for the '-' and one for the null */
+    shmemData->path = new char [homelen+sizeof(MEMSEGPATH)+strlen(name)+UID_DIGITS+3];
+    if (shmemData->path == NULL) {
+	delete shmemData;
+	return NULL;
+    }
+    memcpy(shmemData->path,homedir, homelen);
+    memcpy(&shmemData->path[homelen],MEMSEGPATH, sizeof(MEMSEGPATH));
     int mask = umask(0);
-    int ret = mkdir (MEMSEGPATH, 01777);
+    int ret = mkdir (shmemData->path, 0700);
     umask(mask);
     if ((ret == -1) && (errno != EEXIST)) {
 	delete shmemData;
 	return NULL;
     }
-    /* 1 for the '/', one for the '-' and one for the null */
-    shmemData->path = new char [sizeof(MEMSEGPATH)+strlen(name)+UID_DIGITS+3];
-    if (shmemData->path == NULL) {
-	delete shmemData;
-	return NULL;
-    }
-    memcpy(shmemData->path,MEMSEGPATH, sizeof(MEMSEGPATH));
-    shmemData->path[sizeof(MEMSEGPATH)-1] = '/';
-    strcpy(&shmemData->path[sizeof(MEMSEGPATH)],name);
+    shmemData->path[homelen+sizeof(MEMSEGPATH)-1] = '/';
+    strcpy(&shmemData->path[homelen+sizeof(MEMSEGPATH)],name);
 
     sprintf(uid_str, "-%u",getuid());
     strcat(shmemData->path,uid_str);
