@@ -20,7 +20,12 @@
 #ifndef CKY_CARD_H
 #define CKY_CARD_H 1
 
+#ifdef __APPLE__
+#include <PCSC/winscard.h>
+#include <PCSC/wintypes.h>
+#else
 #include <winscard.h>
+#endif
 
 #include "cky_base.h"
 #include "cky_list.h"

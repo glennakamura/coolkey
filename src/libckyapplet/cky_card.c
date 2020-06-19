@@ -17,7 +17,12 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  * ***** END COPYRIGHT BLOCK ***** */
 
+#ifdef __APPLE__
+#include <PCSC/winscard.h>
+#include <PCSC/wintypes.h>
+#else
 #include <winscard.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 #include "cky_basei.h" /* friend class */

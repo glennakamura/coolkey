@@ -23,7 +23,12 @@
 #include <assert.h>
 #include "log.h"
 #include "PKCS11Exception.h"
+#ifdef __APPLE__
+#include <PCSC/winscard.h>
+#include <PCSC/wintypes.h>
+#else
 #include <winscard.h>
+#endif
 #include "slot.h"
 #include "zlib.h"
 #include "params.h"

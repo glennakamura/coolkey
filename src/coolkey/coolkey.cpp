@@ -29,7 +29,12 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
+#ifdef __APPLE__
+#include <PCSC/winscard.h>
+#include <PCSC/wintypes.h>
+#else
 #include <winscard.h>
+#endif
 #include "slot.h"
 #include "cky_base.h"
 #include "params.h"
